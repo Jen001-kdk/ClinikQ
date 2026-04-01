@@ -2,7 +2,7 @@ import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { UserPlus, CheckCircle2, MoreVertical } from 'lucide-react';
 
-const LiveQueue = () => {
+const LiveQueue = ({ serving, onCallNext, onMarkDone }) => {
   return (
     <div className="bg-[#0ea5e9] rounded-24 p-6 text-white shadow-soft relative overflow-hidden group h-[320px] flex flex-col">
       <div className="relative z-10 flex flex-col h-full">
@@ -19,23 +19,30 @@ const LiveQueue = () => {
         <div className="flex-1 flex flex-col items-center justify-center text-center">
           <p className="text-[9px] font-black uppercase tracking-[0.2em] opacity-70 mb-1">Now Serving</p>
           <motion.div 
+            key={serving?.tokenId || 'idle'}
             initial={{ scale: 0.9, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             className="text-6xl font-black mb-2 tracking-tighter drop-shadow-lg"
           >
-            #03
+            #{serving?.tokenId || '--'}
           </motion.div>
-          <p className="text-sm font-bold mb-4 uppercase tracking-wide">Ananya Reddy</p>
+          <p className="text-sm font-bold mb-4 uppercase tracking-wide">{serving?.userName || 'No patient currently'}</p>
           <span className="px-3 py-1 bg-white/10 rounded-full text-[9px] font-black uppercase tracking-widest border border-white/5 backdrop-blur-md">
-            Consultation Phase
+            {serving ? 'Consultation Phase' : 'Standing By'}
           </span>
         </div>
 
         <div className="grid grid-cols-2 gap-2 mt-auto">
-          <button className="flex items-center justify-center gap-2 bg-white text-[#0ea5e9] py-3 rounded-16 text-[9px] font-black uppercase tracking-widest hover:scale-[1.02] active:scale-95 transition-smooth shadow-lg shadow-blue-900/10">
+          <button 
+            onClick={onCallNext}
+            className="flex items-center justify-center gap-2 bg-white text-[#0ea5e9] py-3 rounded-16 text-[9px] font-black uppercase tracking-widest hover:scale-[1.02] active:scale-95 transition-smooth shadow-lg shadow-blue-900/10"
+          >
             <UserPlus size={14} strokeWidth={3} /> Call Next
           </button>
-          <button className="flex items-center justify-center gap-2 bg-white/20 border border-white/10 text-white py-3 rounded-16 text-[9px] font-black uppercase tracking-widest hover:bg-white/30 active:scale-95 transition-smooth">
+          <button 
+            onClick={onMarkDone}
+            className="flex items-center justify-center gap-2 bg-white/20 border border-white/10 text-white py-3 rounded-16 text-[9px] font-black uppercase tracking-widest hover:bg-white/30 active:scale-95 transition-smooth"
+          >
             <CheckCircle2 size={14} /> Done
           </button>
         </div>

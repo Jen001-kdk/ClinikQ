@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import { toast } from 'react-hot-toast';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   FaUser, FaEnvelope, FaPhone, FaMapMarkerAlt, FaCalendarAlt, 
@@ -118,12 +119,13 @@ const PatientProfile = () => {
     try {
       setLoading(true);
       const token = localStorage.getItem('token');
-      const response = await axios.get('/api/user/profile', {
-        headers: { Authorization: `Bearer \${token}` }
+      const response = await axios.get('/api/users/profile', {
+        headers: { Authorization: `Bearer ${token}` }
       });
       setProfile(response.data);
     } catch (error) {
       console.error("Error fetching profile:", error);
+      toast.error("Failed to load profile data.");
     } finally {
       setLoading(false);
     }
@@ -141,12 +143,15 @@ const PatientProfile = () => {
     try {
       setSaving(true);
       const token = localStorage.getItem('token');
-      await axios.put('/api/user/profile', profile, {
-        headers: { Authorization: `Bearer \${token}` }
+      const response = await axios.put('/api/users/profile', profile, {
+        headers: { Authorization: `Bearer ${token}` }
       });
+      setProfile(response.data);
       setIsEditing(false);
+      toast.success("Profile updated successfully!");
     } catch (error) {
       console.error("Error updating profile:", error);
+      toast.error("Failed to update profile.");
     } finally {
       setSaving(false);
     }
@@ -173,9 +178,11 @@ const PatientProfile = () => {
         <div className="flex flex-col gap-3">
           <div className="flex flex-col">
             <h1 className="text-4xl font-black text-[#0F172A] tracking-tight leading-tight">
-              {profile.name || 'Loading...'}
+              {profile.name || 'Patient Name'}
             </h1>
-            <p className="text-sm font-bold text-gray-400 mt-1">Patient Identifier: PAT-{String(profile._id || '0000').slice(-6).toUpperCase()}</p>
+            <p className="text-sm font-bold text-gray-400 mt-1 uppercase tracking-widest">
+              Patient Identifier: <span className="text-cyan-600">{profile.patientId || 'PAT-0000'}</span>
+            </p>
           </div>
           
           <div className="flex items-center gap-2.5">

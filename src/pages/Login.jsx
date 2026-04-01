@@ -126,7 +126,7 @@ const Login = () => {
         <div className="text-center">
           <div className="text-3xl font-black text-[#9d4ead] italic mb-3 tracking-tighter">ClinikQ</div>
           <h2 className="text-2xl font-black text-[#1E293B]">
-            {registeredName ? `Welcome, ${registeredName}` : 'Secure Sign In'}
+            Welcome..
           </h2>
           <p className="text-xs font-bold text-[#64748B] mt-2 uppercase tracking-[0.2em]">Manage your medical data</p>
         </div>

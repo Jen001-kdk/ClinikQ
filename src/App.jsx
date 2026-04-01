@@ -7,6 +7,7 @@ import Login from "./pages/Login";
 import Register from "./pages/Register";
 import AdminDashboard from "./pages/AdminDashboard";
 import ErrorBoundary from "./components/ErrorBoundary";
+import { Toaster } from 'react-hot-toast';
 import { motion, AnimatePresence } from "framer-motion";
 
 const SplashScreen = () => (
@@ -57,6 +58,7 @@ function App() {
 
   return (
     <Router>
+      <Toaster position="top-right" reverseOrder={false} />
       <ErrorBoundary>
         <AnimatePresence>
           {showSplash && <SplashScreen />}

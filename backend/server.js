@@ -44,6 +44,7 @@ mongoose.connect(mongoURI)
 // Blueprint for User (with timestamps)
 const userSchema = new mongoose.Schema({
   name: { type: String, required: true },
+  full_name: String, // Keeping for backward compatibility
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },
   role: { type: String, default: 'patient' },
@@ -53,10 +54,16 @@ const userSchema = new mongoose.Schema({
   bloodType: String,
   contact: String,
   address: String,
+  patientId: { type: String, unique: true, sparse: true },
   // Doctor Fields
   degree: String,
   specialization: String,
-  license: String
+  license: String,
+  workingDays: { type: [String], default: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'] },
+  startTime: { type: String, default: '09:00' },
+  endTime: { type: String, default: '17:00' },
+  maxPatients: { type: Number, default: 30 },
+  avgConsultTime: { type: Number, default: 15 }
 }, { timestamps: true });
 
 const User = mongoose.model('User', userSchema);
@@ -68,14 +75,17 @@ const departmentSchema = new mongoose.Schema({
 const Department = mongoose.model('Department', departmentSchema);
 
 const tokenSchema = new mongoose.Schema({
-  userId: { type: String }, // Store name or ID for simplicity in this demo
+  userId: { type: String }, // Keep for backward compatibility if needed
+  patientId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  doctorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   userName: String,
   tokenId: String, // e.g., A-048
   department: String,
   doctor: String,
-  status: { type: String, enum: ['Waiting', 'Now Serving', 'Completed', 'Cancelled'], default: 'Waiting' },
+  status: { type: String, enum: ['Waiting', 'Now Serving', 'Completed', 'Cancelled', 'pending'], default: 'pending' },
   position: Number,
   estimatedWait: String,
+  bookedTime: String,
   roomNumber: { type: String, default: 'Room 4' },
   date: { type: String, default: () => new Date().toLocaleDateString('en-GB') }
 }, { timestamps: true });
@@ -135,10 +145,19 @@ app.post('/api/register', async (req, res) => {
     } = req.body;
     
     const hashedPassword = await bcrypt.hash(password, 10);
+    
+    // Generate a unique patient ID (e.g., PAT-1234)
+    let patientId = null;
+    if (role === 'patient') {
+      const randomId = Math.floor(1000 + Math.random() * 9000);
+      patientId = `PAT-${randomId}`;
+    }
+
     const newUser = new User({ 
       name, email, password: hashedPassword, role,
       age, gender, bloodType, contact, address,
-      degree, specialization, license
+      degree, specialization, license,
+      patientId
     });
     
     await newUser.save();
@@ -189,7 +208,7 @@ app.post('/api/login', async (req, res) => {
     res.status(200).json({
       message: "Login successful",
       token: "dummy-jwt-token-" + user._id, // Placeholder token
-      full_name: user.name,
+      full_name: user.full_name || user.name,
       role: user.role,
       specialization: user.role === 'doctor' ? user.specialization : undefined
     });
@@ -294,11 +313,27 @@ app.get('/api/doctor/summary', async (req, res) => {
       return res.status(401).json({ error: 'Unauthorized role' });
     }
 
+    // Calculate real stats for this doctor
+    const today = new Date().toLocaleDateString('en-GB');
+    const [patientsWaiting, completedToday, totalPatients, pendingReports] = await Promise.all([
+      Token.countDocuments({ doctorId: user._id, date: today, status: { $in: ['Waiting', 'pending'] } }),
+      Token.countDocuments({ doctorId: user._id, date: today, status: 'Completed' }),
+      Token.countDocuments({ doctorId: user._id }),
+      Report.countDocuments({ doctorId: user._id, status: 'pending' })
+    ]);
+
     // Return the real doctor's information plus summary stats
     const response = {
-      ...dummySummary, // Placeholder for other stats like 'trends', 'cards', etc.
+      ...dummySummary, 
       doctorName: user.name,
       specialization: user.specialization || 'Medical Specialist',
+      stats: {
+        ...dummySummary.stats,
+        patientsWaiting,
+        patientsSeen: totalPatients,
+        pendingReports,
+        completedReports: completedToday
+      },
       date: new Date().toLocaleDateString('en-GB', { 
         weekday: 'long', 
         day: 'numeric', 
@@ -338,7 +373,7 @@ const appointments = [...dummyAppointments];
 // Fetch all registered doctors
 app.get('/api/doctors', async (req, res) => {
   try {
-    const doctors = await User.find({ role: 'doctor' }, 'name specialization degree license');
+    const doctors = await User.find({ role: 'doctor' }, '_id name specialization degree license workingDays avgConsultTime startTime endTime');
     res.json(doctors);
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch doctors' });
@@ -347,10 +382,16 @@ app.get('/api/doctors', async (req, res) => {
 
 app.get('/api/appointments', async (req, res) => {
   try {
-    const { userName } = req.query;
+    const { userName, date, doctor, doctorId } = req.query;
     let query = {};
     if (userName) query.userName = userName;
-    const tokens = await Token.find(query).sort({ createdAt: -1 });
+    if (date) query.date = date;
+    if (doctor) query.doctor = doctor;
+    if (doctorId) query.doctorId = doctorId;
+    
+    const tokens = await Token.find(query)
+      .populate('patientId', 'name email role')
+      .sort({ createdAt: -1 });
     res.json(tokens);
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch appointments' });
@@ -359,44 +400,105 @@ app.get('/api/appointments', async (req, res) => {
 
 app.post('/api/tokens', async (req, res) => {
   try {
-    const { userName, department, doctor } = req.body;
-    if (!userName || !department) {
-      return res.status(400).json({ error: 'userName and department are required' });
+    const { userName, department, doctor, date, patientId, doctorId } = req.body;
+    if (!department || !doctor || !date) {
+      return res.status(400).json({ error: 'department, doctor, and date are required' });
+    }
+
+    // Fetch the doctor's document to get their specific settings
+    const docUser = doctorId 
+      ? await User.findById(doctorId) 
+      : await User.findOne({ name: doctor, role: 'doctor' });
+      
+    if (!docUser) {
+      return res.status(404).json({ error: `Doctor ${doctor} not found.` });
     }
 
     const dept = await Department.findOne({ name: department });
-    const avgTime = dept ? dept.avgConsultTime : 15;
+    let avgTime = docUser.avgConsultTime || (dept ? dept.avgConsultTime : 15);
 
-    // Count people ahead in the same department today
-    const today = new Date().toLocaleDateString('en-GB');
-    const count = await Token.countDocuments({ department, date: today, status: 'Waiting' });
+    // Check if it's a working day for the doctor
+    if (docUser.workingDays && docUser.workingDays.length > 0) {
+       const parts = date.split('/');
+       const d = new Date(parts[2], parts[1]-1, parts[0]);
+       const dayOfWeek = d.toLocaleDateString('en-GB', { weekday: 'short' });
+       
+       if (!docUser.workingDays.includes(dayOfWeek)) {
+          return res.status(400).json({ error: `Dr. ${doctor} is not available on ${dayOfWeek} (${date}).` });
+       }
+    }
+
+    // Shift timing check for today
+    const todayStr = new Date().toLocaleDateString('en-GB');
+    if (date === todayStr) {
+       const now = new Date();
+       const currentHHMM = now.getHours().toString().padStart(2, '0') + ":" + now.getMinutes().toString().padStart(2, '0');
+       
+       if (docUser.startTime && currentHHMM < docUser.startTime) {
+         return res.status(400).json({ error: `Dr. ${doctor}'s shift hasn't started yet. Starts at ${docUser.startTime}.` });
+       }
+       if (docUser.endTime && currentHHMM > docUser.endTime) {
+         return res.status(400).json({ error: `Dr. ${doctor}'s shift has ended for today. It was until ${docUser.endTime}.` });
+       }
+    }
+
+    // Count people ahead in the same department/doctor today
+    const queryDate = date; 
+    const count = await Token.countDocuments({ 
+      doctorId: docUser._id, 
+      date: queryDate, 
+      status: { $in: ['Waiting', 'Now Serving', 'pending'] } 
+    });
     
     const position = count + 1;
     const estimatedMinutes = position * avgTime;
     const estimatedWait = `~${estimatedMinutes} min`;
 
-    // Generate tokenId (e.g., A-001)
+    // Generate tokenId (e.g., A-001) incrementing correctly for the doctor
     const prefix = department.charAt(0).toUpperCase();
-    const totalToday = await Token.countDocuments({ department, date: today });
-    const tokenId = `${prefix}-${(totalToday + 1).toString().padStart(3, '0')}`;
+    
+    // Find the last token for this doctor TODAY
+    const lastToken = await Token.findOne({ 
+      doctorId: docUser._id, 
+      date: queryDate 
+    }).sort({ createdAt: -1 });
+
+    let nextNumber = 1;
+    if (lastToken && lastToken.tokenId) {
+      const parts = lastToken.tokenId.split('-');
+      if (parts.length > 1) {
+        nextNumber = parseInt(parts[1]) + 1;
+      }
+    }
+    
+    const tokenId = `${prefix}-${nextNumber.toString().padStart(3, '0')}`;
+
+    // Token time = now + total estimated minutes for the queue
+    const bookedTimeDate = new Date();
+    bookedTimeDate.setMinutes(bookedTimeDate.getMinutes() + estimatedMinutes);
+    const bookedTime = bookedTimeDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
     const newToken = new Token({
-      userName,
+      patientId: patientId || null,
+      doctorId: docUser._id,
+      userName: userName || "Patient",
       tokenId,
       department,
-      doctor,
+      doctor: docUser.name,
+      status: 'pending',
       position,
       estimatedWait,
+      bookedTime,
       roomNumber: `Room ${Math.floor(Math.random() * 10) + 1}`,
-      date: today
+      date: queryDate
     });
 
     await newToken.save();
-    io.emit('queueUpdate', { department }); // Notify clients
+    io.emit('queueUpdate', { department, doctor: docUser.name });
 
     res.json(newToken);
   } catch (err) {
-    console.error(err);
+    console.error("Token creation error:", err);
     res.status(500).json({ error: 'Failed to create token' });
   }
 });
@@ -503,33 +605,124 @@ const getUserByToken = async (req) => {
   return await User.findById(userId).select('-password');
 };
 
-app.get('/api/user/profile', async (req, res) => {
+app.get('/api/users/profile', async (req, res) => {
   try {
     const user = await getUserByToken(req);
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
+    
+    // Ensure patientId exists for older records
+    if (user.role === 'patient' && !user.patientId) {
+      const randomId = Math.floor(1000 + Math.random() * 9000);
+      user.patientId = `PAT-${randomId}`;
+      await user.save();
+    }
+    
     res.json(user);
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch profile' });
   }
 });
 
-app.put('/api/user/profile', async (req, res) => {
+app.put('/api/users/profile', async (req, res) => {
   try {
     const user = await getUserByToken(req);
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
 
-    const { age, gender, bloodType, contact, address } = req.body;
+    const { 
+      name, age, gender, bloodType, contact, address, 
+      workingDays, specialization, license, degree,
+      startTime, endTime, maxPatients, avgConsultTime
+    } = req.body;
     
+    // Core fields
+    if (name) user.name = name;
     user.age = age || user.age;
     user.gender = gender || user.gender;
     user.bloodType = bloodType || user.bloodType;
     user.contact = contact || user.contact;
     user.address = address || user.address;
 
+    // Doctor specifically
+    if (user.role === 'doctor') {
+      if (workingDays) user.workingDays = workingDays;
+      if (specialization) user.specialization = specialization;
+      if (license) user.license = license;
+      if (degree) user.degree = degree;
+      if (startTime) user.startTime = startTime;
+      if (endTime) user.endTime = endTime;
+      if (maxPatients) user.maxPatients = maxPatients;
+      if (avgConsultTime) user.avgConsultTime = avgConsultTime;
+    }
+
+    console.log("Updating profile for user:", user.email, "Data:", req.body);
     await user.save();
+    console.log("Profile saved successfully for:", user.email);
     res.json(user);
   } catch (err) {
+    console.error("Profile update error:", err);
     res.status(500).json({ error: 'Failed to update profile' });
+  }
+});
+
+// --- Queue Management API ---
+
+app.post('/api/queue/next', async (req, res) => {
+  try {
+    const user = await getUserByToken(req);
+    if (!user || user.role !== 'doctor') return res.status(401).json({ error: 'Unauthorized' });
+
+    const today = new Date().toLocaleDateString('en-GB');
+
+    // 1. Mark current 'Now Serving' as 'Completed'
+    await Token.updateMany(
+      { doctorId: user._id, date: today, status: 'Now Serving' },
+      { status: 'Completed', position: 0 }
+    );
+
+    // 2. Find next 'Waiting' or 'pending' patient
+    const nextPatient = await Token.findOne({ 
+      doctorId: user._id, 
+      date: today, 
+      status: { $in: ['Waiting', 'pending'] } 
+    }).sort({ createdAt: 1 });
+
+    if (nextPatient) {
+      nextPatient.status = 'Now Serving';
+      nextPatient.position = 0;
+      await nextPatient.save();
+      
+      // Emit socket notification for the specific user
+      io.emit('notification', { 
+        userId: nextPatient.userName, 
+        message: 'It is your turn! Please come to the consultation room.',
+        type: 'turn'
+      });
+    }
+
+    io.emit('queueUpdate', { doctorId: user._id });
+    res.json({ success: true, nextPatient });
+  } catch (err) {
+    console.error("Queue Error:", err);
+    res.status(500).json({ error: 'Failed to advance queue' });
+  }
+});
+
+app.post('/api/queue/done', async (req, res) => {
+  try {
+    const user = await getUserByToken(req);
+    if (!user || user.role !== 'doctor') return res.status(401).json({ error: 'Unauthorized' });
+
+    const today = new Date().toLocaleDateString('en-GB');
+
+    await Token.updateMany(
+      { doctorId: user._id, date: today, status: 'Now Serving' },
+      { status: 'Completed', position: 0 }
+    );
+
+    io.emit('queueUpdate', { doctor: user.name });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to complete appointment' });
   }
 });
 
@@ -611,9 +804,28 @@ const dummyHistory = {
   // additional sample records could be added here
 };
 
-app.get('/api/patients', (req, res) => {
-  // return entire list; real logic would paginate or search
-  return res.json(dummyPatients);
+app.get('/api/patients', async (req, res) => {
+  try {
+    // Return real patients from MongoDB
+    const patients = await User.find({ role: 'patient' }, 'name email age gender contact address patientId createdAt').sort({ createdAt: -1 });
+    // Map to a shape compatible with both Doctor and Admin dashboards
+    const mapped = patients.map(p => ({
+      _id: p._id,
+      id: p.patientId || p._id.toString(),
+      name: p.name,
+      email: p.email,
+      age: p.age || '--',
+      gender: p.gender || '--',
+      contact: p.contact || '--',
+      address: p.address || '--',
+      lastVisit: p.createdAt ? new Date(p.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '--',
+      status: 'Active',
+    }));
+    return res.json(mapped);
+  } catch (err) {
+    console.error('Failed to fetch patients:', err);
+    return res.status(500).json({ error: 'Failed to fetch patients' });
+  }
 });
 
 // endpoint to fetch history for a particular patient
@@ -623,4 +835,95 @@ app.get('/api/patients/:id/history', (req, res) => {
   return res.json(history);
 });
 
-server.listen(5001, () => console.log("🚀 Backend Server is running on Port 5001"));
+// ---- Admin Queue endpoint: all tokens with populated patient/doctor names ----
+app.get('/api/admin/queue', async (req, res) => {
+  try {
+    const today = new Date().toLocaleDateString('en-GB');
+    const { date } = req.query;
+    const queryDate = date || today;
+
+    const tokens = await Token.find({ date: queryDate })
+      .populate('patientId', 'name patientId email')
+      .populate('doctorId', 'name specialization')
+      .sort({ createdAt: -1 });
+
+    const stats = {
+      total: tokens.length,
+      waiting: tokens.filter(t => t.status === 'Waiting' || t.status === 'pending').length,
+      inProgress: tokens.filter(t => t.status === 'Now Serving').length,
+      completed: tokens.filter(t => t.status === 'Completed').length,
+      cancelled: tokens.filter(t => t.status === 'Cancelled').length,
+    };
+
+    res.json({ tokens, stats });
+  } catch (err) {
+    console.error('Admin queue error:', err);
+    res.status(500).json({ error: 'Failed to fetch admin queue' });
+  }
+});
+
+// Admin: update token status (complete / cancel)
+app.patch('/api/admin/queue/:id', async (req, res) => {
+  try {
+    const { status } = req.body;
+    const token = await Token.findByIdAndUpdate(req.params.id, { status }, { new: true })
+      .populate('patientId', 'name patientId')
+      .populate('doctorId', 'name');
+    io.emit('queueUpdate', {});
+    res.json(token);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update token' });
+  }
+});
+
+// Admin: generate token on behalf of a patient
+app.post('/api/admin/token', async (req, res) => {
+  try {
+    const { patientId, doctorId, department, timeSlot } = req.body;
+    if (!patientId || !doctorId || !department) {
+      return res.status(400).json({ error: 'patientId, doctorId, and department are required' });
+    }
+
+    const patient = await User.findById(patientId);
+    const doctor = await User.findById(doctorId);
+    if (!patient || !doctor) return res.status(404).json({ error: 'Patient or Doctor not found' });
+
+    const today = new Date().toLocaleDateString('en-GB');
+    const count = await Token.countDocuments({ doctorId: doctor._id, date: today, status: { $in: ['Waiting', 'Now Serving', 'pending'] } });
+    const position = count + 1;
+    const avgTime = doctor.avgConsultTime || 15;
+    const estimatedMinutes = position * avgTime;
+    const estimatedWait = `~${estimatedMinutes} min`;
+    const prefix = department.charAt(0).toUpperCase();
+    const lastToken = await Token.findOne({ doctorId: doctor._id, date: today }).sort({ createdAt: -1 });
+    let nextNumber = 1;
+    if (lastToken && lastToken.tokenId) {
+      const parts = lastToken.tokenId.split('-');
+      if (parts.length > 1) nextNumber = parseInt(parts[1]) + 1;
+    }
+    const tokenId = `${prefix}-${nextNumber.toString().padStart(3, '0')}`;
+    const bookedTimeDate = new Date();
+    bookedTimeDate.setMinutes(bookedTimeDate.getMinutes() + estimatedMinutes);
+    const bookedTime = timeSlot || bookedTimeDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    const newToken = new Token({
+      patientId: patient._id,
+      doctorId: doctor._id,
+      userName: patient.name,
+      tokenId, department,
+      doctor: doctor.name,
+      status: 'Waiting',
+      position, estimatedWait, bookedTime,
+      roomNumber: `Room ${Math.floor(Math.random() * 10) + 1}`,
+      date: today,
+    });
+    await newToken.save();
+    io.emit('queueUpdate', {});
+    res.json(newToken);
+  } catch (err) {
+    console.error('Admin token error:', err);
+    res.status(500).json({ error: 'Failed to generate token' });
+  }
+});
+
+server.listen(5001, () => console.log("🚀 Backend Server is running on Port 5001"));

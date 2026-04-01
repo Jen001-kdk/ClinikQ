@@ -17,6 +17,7 @@ const AppointmentCard = ({ app, onCancel }) => {
   
   const statusConfig = {
     'Upcoming': { color: 'bg-blue-50 text-blue-600', dot: 'bg-blue-500' },
+    'pending': { color: 'bg-orange-50 text-orange-600', dot: 'bg-orange-500' },
     'Waiting': { color: 'bg-blue-50 text-blue-600', dot: 'bg-blue-500' },
     'Now Serving': { color: 'bg-emerald-50 text-emerald-600', dot: 'bg-emerald-500' },
     'Completed': { color: 'bg-emerald-50 text-emerald-600', dot: 'bg-emerald-500' },
@@ -65,7 +66,7 @@ const AppointmentCard = ({ app, onCancel }) => {
             <div className={`flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold ${config.color}`}>
                <div className={`w-2 h-2 rounded-full ${config.dot}`}></div> {app.status}
             </div>
-            {(app.status === 'Waiting' || app.status === 'Upcoming') && (
+            {(app.status === 'Waiting' || app.status === 'Upcoming' || app.status === 'pending') && (
               <button 
                 onClick={() => setIsOpen(!isOpen)}
                 className={`w-10 h-10 rounded-[14px] bg-gray-50 text-gray-400 flex items-center justify-center hover:bg-blue-50 hover:text-blue-500 transition-all duration-450 ease-in-out ${isOpen ? 'rotate-90 scale-110 shadow-sm' : ''}`}
@@ -172,6 +173,7 @@ const PatientsDashboard = ({ initialTab = 'dashboard' }) => {
   const [formData, setFormData] = useState({
     department: '',
     doctor: '',
+    doctorId: '',
     date: ''
   });
 
@@ -193,7 +195,8 @@ const PatientsDashboard = ({ initialTab = 'dashboard' }) => {
     // Filter doctors by selected department specialization
     const matchingDoctor = doctors.find(doc => doc.specialization === dept);
     const doctorName = matchingDoctor ? matchingDoctor.name : '';
-    setFormData({ ...formData, department: dept, doctor: doctorName });
+    const doctorId = matchingDoctor ? matchingDoctor._id : '';
+    setFormData({ ...formData, department: dept, doctor: doctorName, doctorId: doctorId });
   };
 
   const [user, setUser] = useState({ name: 'Patient', role: 'patient' });
@@ -210,9 +213,28 @@ const PatientsDashboard = ({ initialTab = 'dashboard' }) => {
     fetchData();
     const BASE_URL = 'http://localhost:5001/api';
     const socket = io('http://localhost:5001');
+    
     socket.on('queueUpdate', (data) => {
       fetchData();
     });
+
+    // Integrated Notification Listener
+    socket.on('notification', (data) => {
+      // Check if this notification is for the current user
+      if (data.userId === localStorage.getItem('userName')) {
+        if ("Notification" in window && Notification.permission === "granted") {
+           new Notification("ClinikQ Update", {
+              body: data.message,
+              icon: "/favicon.ico",
+              silent: false,
+              requireInteraction: true
+           });
+        } else {
+           alert(data.message);
+        }
+      }
+    });
+
     return () => socket.disconnect();
   }, []);
 
@@ -237,13 +259,20 @@ const PatientsDashboard = ({ initialTab = 'dashboard' }) => {
   const fetchData = async () => {
     try {
       const userName = localStorage.getItem('userName') || 'Patient';
-      const [apptsRes, deptsRes, docsRes, statsRes, reportsRes] = await Promise.all([
+      const token = localStorage.getItem('token');
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+
+      const [profileRes, apptsRes, deptsRes, docsRes, statsRes, reportsRes] = await Promise.all([
+        axios.get('/api/users/profile', { headers }),
         axios.get(`/api/appointments?userName=${userName}`),
         axios.get('/api/departments'),
         axios.get('/api/doctors'),
         axios.get(`/api/patient/stats?userName=${userName}`),
         axios.get(`/api/patient/reports?userName=${userName}`)
       ]);
+      
+      const userProfile = profileRes.data;
+      setUser(prev => ({ ...prev, ...userProfile }));
       
       const appts = apptsRes.data;
       setAppointments(appts);
@@ -253,27 +282,43 @@ const PatientsDashboard = ({ initialTab = 'dashboard' }) => {
       
       const { totalVisits, reportsCount, alertsCount } = statsRes.data;
       
-      const active = appts.find(a => a.status === 'Waiting' || a.status === 'Now Serving');
+      const active = appts.find(a => a.status === 'Waiting' || a.status === 'Now Serving' || a.status === 'pending');
       setActiveToken(active);
       
       setStats({
         total: appts.length,
         completed: totalVisits || appts.filter(a => a.status === 'Completed').length,
-        pending: reportsCount || 0,
+        pending: appts.filter(a => a.status === 'pending').length,
         upcoming: appts.filter(a => a.status === 'Waiting').length,
         cancelled: appts.filter(a => a.status === 'Cancelled').length,
         reportsCount: reportsCount || 0,
         alertsCount: alertsCount || 3
       });
       
-      if (activeToken) {
+      if (active) {
         const [servRes, posRes] = await Promise.all([
-          axios.get(`/api/queue/serving/${activeToken.department}?doctor=${activeToken.doctor}`),
-          axios.get(`/api/queue/position/${activeToken.tokenId}`)
+          axios.get(`/api/queue/serving/${active.department}?doctor=${active.doctor}`),
+          axios.get(`/api/queue/position/${active.tokenId}`)
         ]);
+        
         setServingToken(servRes.data);
-        // We can temporarily store the aheadCount in the activeToken state or a separate one
-        setActiveToken(prev => ({ ...prev, aheadCount: posRes.data.aheadCount }));
+        const aheadCount = posRes.data.aheadCount;
+        setActiveToken({ ...active, aheadCount });
+
+        // Proximity Notification: Alert if only 1 person is ahead
+        if (aheadCount === 1) {
+           const notifiedKey = `notified_prox_${active.tokenId}`;
+           if (!sessionStorage.getItem(notifiedKey)) {
+              if ("Notification" in window && Notification.permission === "granted") {
+                 new Notification("ClinikQ: You are Next!", {
+                    body: `Only 1 patient ahead for Dr. ${active.doctor}. Please get ready!`,
+                    icon: "/favicon.ico",
+                    requireInteraction: true
+                 });
+                 sessionStorage.setItem(notifiedKey, "true");
+              }
+           }
+        }
       }
       
       setLoading(false);
@@ -287,18 +332,42 @@ const PatientsDashboard = ({ initialTab = 'dashboard' }) => {
     e.preventDefault();
     if (!formData.department || !formData.doctor || !formData.date) return;
     
+    // date comes as YYYY-MM-DD from type="date" input
+    const [year, month, day] = formData.date.split('-');
+    const formattedDate = `${day}/${month}/${year}`;
+
+    // 1. Client-side working day validation (UX improvement)
+    const selectedDoctor = doctors.find(d => d.name === formData.doctor);
+    if (selectedDoctor && selectedDoctor.workingDays) {
+       const d = new Date(year, month - 1, day);
+       const dayName = d.toLocaleDateString('en-GB', { weekday: 'short' });
+       
+       if (!selectedDoctor.workingDays.includes(dayName)) {
+          alert(`Alert: Dr. ${formData.doctor} is not available on ${dayName} (${formattedDate}). Please select another day.`);
+          return;
+       }
+    }
+
     setBookingLoading(true);
     try {
       const res = await axios.post('/api/tokens', {
         ...formData,
-        userName: user.name
+        date: formattedDate, // Send correctly formatted date to backend
+        userName: user.name,
+        patientId: user._id
       });
+      
+      // Update local state and switch tab
       setActiveToken(res.data);
+      setAppointments(prev => [res.data, ...prev]);
+      
       setBookingLoading(false);
       // Wait for a smooth transition before switching tab
       setTimeout(() => setActiveTab('dashboard'), 300);
     } catch (err) {
       console.error("Booking error:", err);
+      const errorMsg = err.response?.data?.error || "Failed to book token. Please try again.";
+      alert(errorMsg);
       setBookingLoading(false);
     }
   };
@@ -349,26 +418,29 @@ const PatientsDashboard = ({ initialTab = 'dashboard' }) => {
     // The user wants position calculated as "how many tokens are ahead"
     const patientPosition = activeToken.aheadCount || 0;
     
-    // Formula: position * 10 minutes
-    const waitMinutes = patientPosition * 10;
-    
-    // Expected By logic: Current Time + waitMinutes
-    // We update this target when position changes
-    const targetTime = new Date(currentTime.getTime() + waitMinutes * 60 * 1000);
-    
-    // Countdown from current time to target
-    const remainingMs = waitMinutes * 60 * 1000; 
-    
-    const mins = Math.floor(remainingMs / 60000);
-    const secs = Math.floor((remainingMs % 60000) / 1000); // This isn't quite right for a "decrease every second" experience because waitMinutes only changes on fetch.
-    // However, since currentTime updates every second, we should use a fixed target relative to the last fetch.
+    // Use the stored bookedTime from backend for stability
+    // If not present, fallback to createdAt + 15 mins
+    let targetTime;
+    if (activeToken.bookedTime) {
+      targetTime = new Date();
+      const [time, modifier] = activeToken.bookedTime.split(' ');
+      let [hours, minutes] = time.split(':');
+      hours = parseInt(hours);
+      minutes = parseInt(minutes);
+      
+      if (modifier === 'PM' && hours < 12) hours += 12;
+      if (modifier === 'AM' && hours === 12) hours = 0;
+      
+      targetTime.setHours(hours, minutes, 0, 0);
+    } else {
+      targetTime = new Date(new Date(activeToken.createdAt).getTime() + 15 * 60 * 1000);
+    }
     
     return {
       patientPosition,
-      waitMinutes,
       expectedTime: targetTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      isClose: patientPosition <= 2 && patientPosition > 0,
-      rawRemainingMs: remainingMs
+      targetTimeMs: targetTime.getTime(),
+      isClose: patientPosition <= 2 && patientPosition > 0
     };
   }, [activeToken?.aheadCount, activeToken?.tokenId]); // Only recalculate when position/token changes
 
@@ -381,17 +453,9 @@ const PatientsDashboard = ({ initialTab = 'dashboard' }) => {
 
     const timer = setInterval(() => {
       const now = new Date().getTime();
-      // Target is relative to when the position was last known
-      // For a true "countdown", we need to know WHEN the position was fetched.
-      // Let's assume the waitTimeMetrics.expectedTime is the target.
-      const target = new Date();
-      const [h, m] = waitTimeMetrics.expectedTime.split(/:| /);
-      const isPM = waitTimeMetrics.expectedTime.includes('PM');
-      target.setHours(isPM && h !== '12' ? parseInt(h) + 12 : (h === '12' && !isPM ? 0 : parseInt(h)));
-      target.setMinutes(parseInt(m));
-      target.setSeconds(0);
+      const target = waitTimeMetrics.targetTimeMs;
 
-      const diff = target.getTime() - now;
+      const diff = target - now;
       if (diff <= 0) {
         setCountdownStr("00:00");
       } else {

@@ -29,10 +29,17 @@ const StatCard = ({ item }) => (
   </motion.div>
 );
 
-const StatCards = () => {
+const StatCards = ({ stats }) => {
+  const analyticsData = [
+    { label: "Total Patients", value: stats?.totalPatients || 0, trend: "+12%", icon: Users, color: "text-blue-600", bg: "bg-blue-50" },
+    { label: "Appointments", value: stats?.appointments || 0, trend: "-5%", icon: Clock, color: "text-cyan-600", bg: "bg-cyan-50" },
+    { label: "Pending Reports", value: stats?.pendingReports || 0, trend: "+2", icon: FileText, color: "text-indigo-600", bg: "bg-indigo-50" },
+    { label: "Completed", value: stats?.completedReports || 0, trend: "100%", icon: CheckCircle2, color: "text-emerald-600", bg: "bg-emerald-50" },
+  ];
+
   return (
     <div className="grid grid-cols-4 gap-4">
-      {ANALYTICS_DATA.map((stat, i) => (
+      {analyticsData.map((stat, i) => (
         <StatCard key={i} item={stat} />
       ))}
     </div>

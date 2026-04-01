@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import axios from "axios";
+import { io } from "socket.io-client";
 import { 
   LayoutDashboard, 
   Users, 
@@ -48,43 +49,20 @@ import AppointmentCalendar from "../components/dashboard/AppointmentCalendar";
 import AppointmentList from "../components/dashboard/AppointmentList";
 import QuickActions from "../components/dashboard/QuickActions";
 import DashboardSkeleton from "../components/dashboard/DashboardSkeleton";
+import AppointmentDetailModal from "../components/dashboard/AppointmentDetailModal";
 
 // --- Mock Data & Consts ---
 
+// Constants moved to state for dynamicity
 const SIDEBAR_NAV = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'patients', label: 'Patients', icon: Users },
-  { id: 'reports', label: 'Reports', icon: FileText, badge: '3' },
+  { id: 'reports', label: 'Reports', icon: FileText },
   { id: 'queue', label: 'Queue Management', icon: ListOrdered },
   { id: 'profile', label: 'Profile', icon: Settings },
 ];
 
-const ANALYTICS_DATA = [
-  { label: "Total Patients", value: "1,250", trend: "+12%", icon: Users, color: "text-blue-500", bg: "bg-blue-50" },
-  { label: "Appointments", value: "45", trend: "-5%", icon: Clock, color: "text-emerald-500", bg: "bg-emerald-50" },
-  { label: "Pending Reports", value: "12", trend: "+2", icon: FileText, color: "text-amber-500", bg: "bg-amber-50" },
-  { label: "Completed Reports", value: "30", trend: "100%", icon: CheckCircle2, color: "text-purple-500", bg: "bg-purple-50" },
-];
-
-const RECENT_ACTIVITY = [
-  { id: 1, text: "New report uploaded for Ananya Reddy", time: "2m ago", type: "report" },
-  { id: 2, text: "Appointment confirmed: Priya Nair", time: "15m ago", type: "appointment" },
-  { id: 3, text: "System update scheduled for 11:00 PM", time: "1h ago", type: "system" },
-];
-
-const PATIENTS_DATA = [
-  { id: "P001", name: "Ananya Reddy", gender: "Female", age: 28, contact: "9876543210", lastVisit: "28 Mar 2026", status: "Completed", initial: "AR" },
-  { id: "P002", name: "Priya Nair", gender: "Female", age: 34, contact: "9123456780", lastVisit: "27 Mar 2026", status: "Pending", initial: "PN" },
-  { id: "P003", name: "Mohammed Irfan", gender: "Male", age: 42, contact: "8877665544", lastVisit: "27 Mar 2026", status: "Completed", initial: "MI" },
-];
-
-const REPORTS_DATA = [
-  { id: "R001", name: "Ananya Reddy", diagnosis: "Viral Infection", date: "2 mins ago" },
-  { id: "R002", name: "Priya Nair", diagnosis: "Blood Analysis", date: "15 mins ago" },
-  { id: "R003", name: "Mohammed Irfan", diagnosis: "ECG Verification", date: "1h ago" },
-  { id: "R004", name: "Kavitha S.", diagnosis: "Thyroid Profile", date: "3h ago" },
-  { id: "R005", name: "Sunita Mehta", diagnosis: "Post-Op Followup", date: "5h ago" },
-];
+const WORKING_DAYS_ORDER = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 const SidebarItem = ({ id, label, icon: Icon, active, onClick, badge }) => (
   <button
@@ -107,6 +85,7 @@ const SidebarItem = ({ id, label, icon: Icon, active, onClick, badge }) => (
 
 // --- Layout & Main Wrapper ---
 
+
 const DoctorDashboard = () => {
   const navigate = useNavigate();
   const [view, setView] = useState('dashboard');
@@ -119,32 +98,160 @@ const DoctorDashboard = () => {
   const [doctorInfo, setDoctorInfo] = useState({
     name: "Doctor",
     specialization: "Specialist",
-    initials: "DR"
+    initials: "DR",
+    workingDays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'],
+    startTime: "09:00",
+    endTime: "17:00",
+    maxPatients: 30,
+    avgConsultTime: 15,
+    specialization: "",
+    license: "",
+    degree: ""
+  });
+  const [saveStatus, setSaveStatus] = useState({ show: false, message: "", type: "" });
+
+  // Real Data State
+  const [patients, setPatients] = useState([]);
+  const [reports, setReports] = useState([]);
+  const [queue, setQueue] = useState([]);
+  const [allAppointments, setAllAppointments] = useState([]);
+  const [stats, setStats] = useState({
+    totalPatients: 0,
+    appointments: 0,
+    pendingReports: 0,
+    completedReports: 0
   });
 
-  useEffect(() => {
-    // 1. Fetch from localStorage
-    const savedName = localStorage.getItem('userName');
-    const savedSpec = localStorage.getItem('specialization');
-    
-    if (savedName) {
-       // Helper to get initials
-       const nameParts = savedName.split(' ');
-       const initials = nameParts.length > 1 
-          ? (nameParts[0][0] + nameParts[nameParts.length - 1][0]).toUpperCase()
-          : savedName.substring(0, 2).toUpperCase();
-       
-       setDoctorInfo({
-          name: savedName,
-          specialization: savedSpec || "Specialist",
-          initials: initials
-       });
-    }
+  // Modal State
+  const [isCalendarModalOpen, setIsCalendarModalOpen] = useState(false);
+  const [selectedDateAppointments, setSelectedDateAppointments] = useState([]);
+  const [selectedDateLabel, setSelectedDateLabel] = useState("");
 
-    // 2. Simulate initial data fetch
-    const timer = setTimeout(() => setIsLoading(false), 1000);
-    return () => clearTimeout(timer);
+  const fetchDoctorData = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const headers = { Authorization: token ? `Bearer ${token}` : '' };
+
+      const [profileRes, summaryRes, patientsRes, reportsRes] = await Promise.all([
+        axios.get('/api/users/profile', { headers }),
+        axios.get('/api/doctor/summary', { headers }),
+        axios.get('/api/patients', { headers }),
+        axios.get('/api/patient/reports?userName=Patient', { headers }) // Mock for reports
+      ]);
+
+      setDoctorInfo(profileRes.data);
+      setStats({
+        totalPatients: patientsRes.data.length,
+        appointments: summaryRes.data.stats.patientsWaiting,
+        pendingReports: summaryRes.data.stats.pendingReports,
+        completedReports: summaryRes.data.stats.completedReports
+      });
+      setPatients(patientsRes.data);
+      setReports(reportsRes.data);
+
+      // Fetch today's queue
+      const today = new Date().toLocaleDateString('en-GB');
+      const queueRes = await axios.get(`/api/appointments?doctorId=${profileRes.data._id}&date=${today}`, { headers });
+      setQueue(queueRes.data);
+
+      // Fetch ALL appointments for this doctor (for calendar dot indicators)
+      const allApptRes = await axios.get(`/api/appointments?doctorId=${profileRes.data._id}`, { headers });
+      setAllAppointments(allApptRes.data);
+
+      setIsLoading(false);
+    } catch (err) {
+      console.error("Fetch error:", err);
+      setIsLoading(false);
+    }
+  };
+
+  const handleSaveSettings = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const headers = { Authorization: token ? `Bearer ${token}` : '' };
+      await axios.put('/api/users/profile', doctorInfo, { headers });
+      setSaveStatus({ show: true, message: "Settings saved successfully!", type: "success" });
+      setTimeout(() => setSaveStatus({ ...saveStatus, show: false }), 3000);
+    } catch (err) {
+      console.error("Save error:", err);
+      setSaveStatus({ show: true, message: "Failed to save settings.", type: "error" });
+      setTimeout(() => setSaveStatus({ ...saveStatus, show: false }), 3000);
+    }
+  };
+
+  useEffect(() => {
+    fetchDoctorData();
+
+    const socket = io('http://localhost:5001');
+    socket.on('queueUpdate', (data) => {
+      // If the update is for this doctor, refresh
+      fetchDoctorData();
+    });
+
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => {
+      socket.disconnect();
+      clearInterval(timer);
+    };
   }, []);
+
+  const handleCallNext = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.post('/api/queue/next', {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      if (!res.data.nextPatient) {
+        setSaveStatus({ show: true, message: "No more patients are waiting in the queue.", type: "info" });
+        setTimeout(() => setSaveStatus(prev => ({ ...prev, show: false })), 3000);
+      }
+      
+      // Socket will trigger refresh
+    } catch (err) {
+      console.error("Queue error:", err);
+      setSaveStatus({ show: true, message: "Error updating queue.", type: "error" });
+      setTimeout(() => setSaveStatus(prev => ({ ...prev, show: false })), 3000);
+    }
+  };
+
+  const handleMarkDone = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      await axios.post('/api/queue/done', {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+    } catch (err) {
+      console.error("Queue error:", err);
+    }
+  };
+
+  const handleToggleWorkingDay = async (day) => {
+    try {
+      const newDays = doctorInfo.workingDays.includes(day)
+        ? doctorInfo.workingDays.filter(d => d !== day)
+        : [...doctorInfo.workingDays, day];
+      
+      const token = localStorage.getItem('token');
+      const res = await axios.put('/api/users/profile', 
+        { workingDays: newDays }, 
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setDoctorInfo(res.data);
+    } catch (err) {
+      console.error("Update error:", err);
+    }
+  };
+
+  const handleDateClick = (date) => {
+    // Filter from already-fetched allAppointments for instant, zero-latency popup
+    const filtered = allAppointments.filter(app => app.date === date);
+    setSelectedDateAppointments(filtered);
+    setSelectedDateLabel(date);
+    setIsCalendarModalOpen(true);
+  };
+
+  const servingPatient = queue.find(q => q.status === 'Now Serving');
 
   const pageTransition = {
     initial: { opacity: 0, y: 10 },
@@ -178,7 +285,6 @@ const DoctorDashboard = () => {
               icon={nav.icon} 
               active={view === nav.id} 
               onClick={setView} 
-              badge={nav.badge}
             />
           ))}
         </nav>
@@ -187,10 +293,10 @@ const DoctorDashboard = () => {
         <div className="p-4 border-t border-white/5 bg-white/5 backdrop-blur-md">
           <div className="flex items-center gap-3 mb-4">
             <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-[#007AFF] to-blue-600 flex items-center justify-center font-black text-white text-xs shadow-lg uppercase">
-              {doctorInfo.initials}
+              {doctorInfo.name ? doctorInfo.name.substring(0, 2).toUpperCase() : 'DR'}
             </div>
             <div className="min-w-0">
-              <p className="text-[11px] font-black truncate">Dr. {doctorInfo.name.split(' ').pop()}</p>
+              <p className="text-[11px] font-black truncate">Dr. {doctorInfo.name ? doctorInfo.name.split(' ').pop() : 'Doctor'}</p>
               <p className="text-[8px] text-[#007AFF] font-bold uppercase tracking-widest truncate">{doctorInfo.specialization}</p>
             </div>
           </div>
@@ -241,7 +347,7 @@ const DoctorDashboard = () => {
                  </div>
                  <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#007AFF] to-blue-600 p-0.5 shadow-md">
                     <div className="w-full h-full bg-white rounded-lg flex items-center justify-center font-black text-slate-900 text-[10px] uppercase">
-                       {doctorInfo.initials}
+                       {doctorInfo.name ? doctorInfo.name.substring(0, 2).toUpperCase() : 'DR'}
                     </div>
                  </div>
               </div>
@@ -268,16 +374,16 @@ const DoctorDashboard = () => {
                             {currentTime.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}
                           </p>
                           <h2 className="text-3xl font-black mb-3 tracking-tight">
-                            Welcome back, <span className="text-white">Dr. {doctorInfo.name.split(' ').pop()}</span>
+                            Welcome back, <span className="text-white">Dr. {doctorInfo.name ? doctorInfo.name.split(' ').pop() : 'Doctor'}</span>
                           </h2>
                           <p className="text-blue-50/70 text-[11px] font-bold max-w-md mb-6 uppercase tracking-wider">
-                            Syncing with MongoDB: 6 appointments & 1 report pending.
+                            Syncing with MongoDB: {queue.filter(q => q.status === 'Waiting').length} appointments & {stats.pendingReports} reports pending.
                           </p>
                           <div className="flex gap-3">
-                            <button className="bg-white text-[#007AFF] px-5 py-2 rounded-xl shadow-lg font-black text-[10px] tracking-widest uppercase hover:brightness-110 transiton-smooth">
+                            <button onClick={() => setView('queue')} className="bg-white text-[#007AFF] px-5 py-2 rounded-xl shadow-lg font-black text-[10px] tracking-widest uppercase hover:brightness-110 transiton-smooth">
                               View Schedule
                             </button>
-                            <button className="bg-white/10 backdrop-blur-md px-5 py-2 rounded-xl border border-white/10 font-black text-[10px] tracking-widest uppercase hover:bg-white/20 transition-smooth">
+                            <button onClick={() => setView('queue')} className="bg-white/10 backdrop-blur-md px-5 py-2 rounded-xl border border-white/10 font-black text-[10px] tracking-widest uppercase hover:bg-white/20 transition-smooth">
                               Queue Stats
                             </button>
                           </div>
@@ -289,7 +395,7 @@ const DoctorDashboard = () => {
                       </div>
 
                       {/* 1. Stat Cards (grid-cols-4) */}
-                      <StatCards />
+                      <StatCards stats={stats} />
 
                       {/* 2. Middle Section (8:4) */}
                       <div className="grid grid-cols-12 gap-6">
@@ -297,17 +403,17 @@ const DoctorDashboard = () => {
                           <PatientFlowChart />
                         </div>
                         <div className="col-span-4">
-                          <LiveQueue />
+                          <LiveQueue serving={servingPatient} onCallNext={handleCallNext} onMarkDone={handleMarkDone} />
                         </div>
                       </div>
 
                       {/* 3. Bottom Section (4:4:4) */}
                       <div className="grid grid-cols-12 gap-6">
                         <div className="col-span-4">
-                          <AppointmentCalendar />
+                          <AppointmentCalendar onDateClick={handleDateClick} allAppointments={allAppointments} />
                         </div>
                         <div className="col-span-4">
-                          <AppointmentList />
+                          <AppointmentList queue={queue.filter(q => q.status === 'Waiting').slice(0, 6)} />
                         </div>
                         <div className="col-span-4">
                           <QuickActions />
@@ -349,7 +455,7 @@ const DoctorDashboard = () => {
                         <Users size={24} />
                       </div>
                       <div>
-                        <p className="text-2xl font-black text-slate-900">{PATIENTS_DATA.length}</p>
+                        <p className="text-2xl font-black text-slate-900">{patients.length}</p>
                         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Total Patients</p>
                       </div>
                     </div>
@@ -395,17 +501,17 @@ const DoctorDashboard = () => {
                         </tr>
                       </thead>
                       <tbody>
-                        {PATIENTS_DATA.filter(p => {
+                        {patients.filter(p => {
                           const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                                              p.contact.includes(searchQuery) ||
-                                              p.id.toLowerCase().includes(searchQuery.toLowerCase());
+                                               p.contact.includes(searchQuery) ||
+                                               p.id.toLowerCase().includes(searchQuery.toLowerCase());
                           const matchesStatus = statusFilter === "All Statuses" || p.status === statusFilter;
                           return matchesSearch && matchesStatus;
                         }).map((p, idx) => (
                           <tr key={p.id} className="hover:bg-slate-50/50 transition-colors group cursor-pointer border-b border-slate-50 last:border-0 font-sans">
                             <td className="px-8 py-5">
                               <div className="flex items-center gap-4">
-                                <div className="w-10 h-10 bg-slate-900 rounded-[14px] flex items-center justify-center font-black text-[11px] text-white group-hover:scale-110 transition-transform shadow-lg">{p.initial}</div>
+                                <div className="w-10 h-10 bg-slate-900 rounded-[14px] flex items-center justify-center font-black text-[11px] text-white group-hover:scale-110 transition-transform shadow-lg">{p.name.substring(0, 2).toUpperCase()}</div>
                                 <div>
                                   <p className="text-sm font-black text-slate-900 leading-tight">{p.name}</p>
                                   <p className="text-[10px] font-bold text-slate-400 mt-0.5">{p.id}</p>
@@ -450,16 +556,16 @@ const DoctorDashboard = () => {
                     </div>
                   </div>
                   <div className="flex-1 overflow-y-auto p-4 no-scrollbar space-y-3 pt-0">
-                    {PATIENTS_DATA.map((r, i) => (
+                    {reports.map((r, i) => (
                       <div key={i} className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm hover:shadow-md hover:border-[#0ea5e9]/30 transition-all cursor-pointer group">
                         <div className="flex items-center gap-4">
-                          <div className="w-10 h-10 bg-slate-100 text-slate-400 rounded-2xl flex items-center justify-center group-hover:bg-[#0ea5e9] group-hover:text-white transition-all uppercase font-black text-[10px]">{r.initial}</div>
+                          <div className="w-10 h-10 bg-slate-100 text-slate-400 rounded-2xl flex items-center justify-center group-hover:bg-[#0ea5e9] group-hover:text-white transition-all uppercase font-black text-[10px]">{r.userName.substring(0, 2)}</div>
                           <div className="flex-1">
                             <div className="flex justify-between items-start">
-                              <p className="text-xs font-black text-slate-900 uppercase tracking-wide">{r.name}</p>
-                              <span className="text-[9px] font-bold text-slate-400">{r.lastVisit}</span>
+                              <p className="text-xs font-black text-slate-900 uppercase tracking-wide">{r.userName}</p>
+                              <span className="text-[9px] font-bold text-slate-400">{r.date}</span>
                             </div>
-                            <p className="text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-tighter">Blood Report • Pending</p>
+                            <p className="text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-tighter">{r.type} • {r.status}</p>
                           </div>
                         </div>
                       </div>
@@ -488,11 +594,11 @@ const DoctorDashboard = () => {
                     <p className="text-xs font-black text-slate-900 uppercase">Recent Reports</p>
                   </div>
                   <div className="flex-1 p-6 space-y-6">
-                    {REPORTS_DATA.slice(0, 5).map((rep, i) => (
+                    {reports.slice(0, 5).map((rep, i) => (
                       <div key={i} className="flex gap-4 group">
                         <div className={`w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 ${i % 2 === 0 ? 'bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]' : 'bg-teal-500 shadow-[0_0_8px_rgba(45,212,191,0.5)]'}`} />
                         <div>
-                          <p className="text-[11px] font-bold text-slate-700 leading-[1.4] uppercase tracking-wide">{rep.name}: {rep.diagnosis}</p>
+                          <p className="text-[11px] font-bold text-slate-700 leading-[1.4] uppercase tracking-wide">{rep.userName}: {rep.type}</p>
                           <p className="text-[9px] font-bold text-slate-400 mt-1 uppercase tracking-widest">{rep.date}</p>
                         </div>
                       </div>
@@ -527,10 +633,10 @@ const DoctorDashboard = () => {
                       {/* Integrated Serving Card */}
                       <div className="bg-gradient-to-br from-[#0ea5e9] to-[#0284c7] rounded-[32px] p-8 text-white text-center shadow-2xl shadow-blue-500/10 relative overflow-hidden h-[320px] flex flex-col justify-center">
                         <p className="text-[10px] font-black uppercase tracking-[0.3em] opacity-70 mb-2">Now Serving</p>
-                        <h3 className="text-[100px] font-black mb-2 tracking-tighter leading-none">#3</h3>
-                        <p className="text-xl font-bold mb-6">Ravi Kumar</p>
+                        <h3 className="text-[100px] font-black mb-2 tracking-tighter leading-none">#{servingPatient?.tokenId || '--'}</h3>
+                        <p className="text-xl font-bold mb-6">{servingPatient?.userName || 'No patient'}</p>
                         <div className="flex justify-center">
-                          <span className="px-6 py-2 bg-black/10 backdrop-blur-md rounded-full text-[10px] font-black uppercase tracking-widest border border-white/10">In Progress</span>
+                          <span className="px-6 py-2 bg-black/10 backdrop-blur-md rounded-full text-[10px] font-black uppercase tracking-widest border border-white/10">{servingPatient ? 'In Progress' : 'Idle'}</span>
                         </div>
                         
                         {/* Abstract Decorations */}
@@ -541,15 +647,15 @@ const DoctorDashboard = () => {
                       {/* Stats Grid (3 columns) */}
                       <div className="grid grid-cols-3 gap-4">
                         <div className="bg-white rounded-24 p-5 border border-slate-100 shadow-sm text-center">
-                          <div className="text-2xl font-black text-slate-800 mb-1">4</div>
+                          <div className="text-2xl font-black text-slate-800 mb-1">{queue.filter(q => q.status === 'Waiting').length}</div>
                           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Waiting</p>
                         </div>
                         <div className="bg-emerald-50/30 rounded-24 p-5 border border-emerald-100 shadow-sm text-center">
-                          <div className="text-2xl font-black text-emerald-600 mb-1">0</div>
+                          <div className="text-2xl font-black text-emerald-600 mb-1">{queue.filter(q => q.status === 'Completed').length}</div>
                           <p className="text-[10px] font-bold text-emerald-600/60 uppercase tracking-widest">Completed</p>
                         </div>
                         <div className="bg-blue-50/30 rounded-24 p-5 border border-blue-100 shadow-sm text-center">
-                          <div className="text-2xl font-black text-blue-600 mb-1">5</div>
+                          <div className="text-2xl font-black text-blue-600 mb-1">{queue.length}</div>
                           <p className="text-[10px] font-bold text-blue-400 uppercase tracking-widest">Total</p>
                         </div>
                       </div>
@@ -559,6 +665,7 @@ const DoctorDashboard = () => {
                         <motion.button 
                           whileHover={{ scale: 1.02, y: -2 }}
                           whileTap={{ scale: 0.98 }}
+                          onClick={handleCallNext}
                           className="bg-[#0ea5e9] text-white py-5 rounded-24 flex items-center justify-center gap-3 shadow-lg shadow-blue-500/20 group"
                         >
                           <SkipForward size={20} strokeWidth={3} className="group-hover:translate-x-1 transition-transform" />
@@ -567,6 +674,7 @@ const DoctorDashboard = () => {
                         <motion.button 
                           whileHover={{ scale: 1.02, y: -2 }}
                           whileTap={{ scale: 0.98 }}
+                          onClick={handleMarkDone}
                           className="bg-[#10b981] text-white py-5 rounded-24 flex items-center justify-center gap-3 shadow-lg shadow-emerald-500/20"
                         >
                           <CheckCircle2 size={20} strokeWidth={3} />
@@ -579,25 +687,19 @@ const DoctorDashboard = () => {
                     <div className="col-span-4 bg-white rounded-[32px] p-8 border border-slate-100 shadow-soft">
                       <div className="flex items-center justify-between mb-8">
                         <h3 className="text-xl font-bold text-slate-900 tracking-tight">Queue List</h3>
-                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest opacity-60">5 tokens today</span>
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest opacity-60">{queue.filter(q => q.status === 'Waiting').length} waiting</span>
                       </div>
                       <div className="space-y-4">
-                        {[
-                          { token: '#3', name: 'Ravi Kumar', wait: 'Now', status: 'In Progress', active: true },
-                          { token: '#4', name: 'Sunita Mehta', wait: '~15 min', status: 'Waiting' },
-                          { token: '#5', name: 'Deepak Verma', wait: '~30 min', status: 'Waiting' },
-                          { token: '#6', name: 'Ananya Reddy', wait: '~45 min', status: 'Waiting' },
-                          { token: '#7', name: 'Mohammed Irfan', wait: '~60 min', status: 'Waiting' },
-                        ].map((q, i) => (
-                          <div key={i} className={`flex items-center gap-5 p-4 rounded-24 transition-all border border-transparent ${q.active ? 'bg-amber-50/50 border-amber-100/30' : 'hover:bg-slate-50'}`}>
-                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-xs font-black ${q.active ? 'bg-amber-100 text-amber-700' : 'bg-slate-50 text-slate-400'}`}>
-                              {q.token}
+                        {queue.map((q, i) => (
+                          <div key={q._id} className={`flex items-center gap-5 p-4 rounded-24 transition-all border border-transparent ${q.status === 'Now Serving' ? 'bg-amber-50/50 border-amber-100/30' : 'hover:bg-slate-50'}`}>
+                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-xs font-black ${q.status === 'Now Serving' ? 'bg-amber-100 text-amber-700' : 'bg-slate-50 text-slate-400'}`}>
+                              {q.tokenId}
                             </div>
                             <div className="flex-1">
-                              <p className="text-sm font-black text-slate-900 leading-none mb-1">{q.name}</p>
-                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest opacity-60">Wait: {q.wait}</p>
+                              <p className="text-sm font-black text-slate-900 leading-none mb-1">{q.userName}</p>
+                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest opacity-60">Wait: {q.estimatedWait}</p>
                             </div>
-                            <span className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest ${q.active ? 'bg-amber-100 text-amber-600' : 'bg-slate-100 text-slate-400'}`}>
+                            <span className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest ${q.status === 'Now Serving' ? 'bg-amber-100 text-amber-600' : 'bg-slate-100 text-slate-400'}`}>
                               {q.status}
                             </span>
                           </div>
@@ -609,28 +711,36 @@ const DoctorDashboard = () => {
                     <div className="col-span-4 bg-white rounded-[32px] p-8 border border-slate-100 shadow-soft">
                       <div className="mb-8">
                         <h3 className="text-xl font-bold text-slate-900 tracking-tight">Today's Schedule</h3>
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1 opacity-60">March 22, 2026</p>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1 opacity-60">{new Date().toLocaleDateString('en-GB', { month: 'long', day: 'numeric', year: 'numeric' })}</p>
                       </div>
                       <div className="space-y-2 max-h-[600px] overflow-y-auto pr-2 no-scrollbar">
-                        {[
-                          { token: '#1', name: 'Arjun Sharma', time: '10:00 AM', status: 'Completed', color: 'text-emerald-500 bg-emerald-50/50' },
-                          { token: '#2', name: 'Priya Nair', time: '10:15 AM', status: 'Completed', color: 'text-emerald-500 bg-emerald-50/50' },
-                          { token: '#3', name: 'Ravi Kumar', time: '10:30 AM', status: 'In Progress', color: 'text-amber-600 bg-amber-50/50' },
-                          { token: '#4', name: 'Sunita Mehta', time: '10:45 AM', status: 'Confirmed', color: 'text-blue-500 bg-blue-50/50' },
-                          { token: '#5', name: 'Deepak Verma', time: '11:00 AM', status: 'Confirmed', color: 'text-blue-500 bg-blue-50/50' },
-                          { token: '#6', name: 'Ananya Reddy', time: '11:15 AM', status: 'Confirmed', color: 'text-blue-500 bg-blue-50/50' },
-                        ].map((s, i) => (
-                          <div key={i} className="flex items-center gap-5 p-4 rounded-24 hover:bg-slate-50 transition-all group">
-                             <span className="text-[11px] font-black text-blue-500 w-8">{s.token}</span>
-                             <div className="flex-1">
-                               <p className="text-sm font-black text-slate-900 group-hover:translate-x-1 transition-transform">{s.name}</p>
-                               <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5 opacity-60">{s.time}</p>
-                             </div>
-                             <span className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest ${s.color}`}>
-                               {s.status}
-                             </span>
-                          </div>
-                        ))}
+                        {queue.map((s, i) => {
+                          const isCompleted = s.status === 'Completed';
+                          const isPending = s.status === 'pending' || s.status === 'Waiting';
+                          
+                          return (
+                            <div key={s._id} className="flex items-center gap-5 p-4 rounded-24 hover:bg-slate-50 transition-all group">
+                               <span className="text-[11px] font-black text-blue-500 w-8">{s.tokenId}</span>
+                               <div className="flex-1">
+                                 <p className="text-sm font-black text-slate-900 group-hover:translate-x-1 transition-transform">
+                                   {s.patientId?.name || s.userName}
+                                 </p>
+                                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5 opacity-60">
+                                   {s.bookedTime}
+                                 </p>
+                               </div>
+                               <div className="flex items-center gap-2">
+                                 <div className={`w-2 h-2 rounded-full ${isCompleted ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : isPending ? 'bg-orange-500 shadow-[0_0_8px_rgba(249,115,22,0.5)]' : 'bg-slate-300'}`} />
+                                 <span className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest ${isCompleted ? 'text-emerald-500 bg-emerald-50/50' : isPending ? 'text-orange-500 bg-orange-50/50' : 'text-slate-400 bg-slate-50'}`}>
+                                   {s.status === 'pending' ? 'pending' : s.status}
+                                 </span>
+                               </div>
+                            </div>
+                          );
+                        })}
+                        {queue.length === 0 && (
+                          <p className="text-center text-slate-300 py-10 uppercase font-black text-[10px]">No appointments today yet</p>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -718,8 +828,12 @@ const DoctorDashboard = () => {
                            <div className="space-y-3">
                               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Working Days</p>
                               <div className="flex gap-2 flex-wrap">
-                                 {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d, i) => (
-                                   <div key={d} className={`px-5 py-2.5 rounded-xl text-[11px] font-bold uppercase tracking-widest transition-all cursor-pointer border ${i >= 1 && i <= 5 ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-400 border-slate-100'}`}>
+                                 {WORKING_DAYS_ORDER.map((d) => (
+                                   <div 
+                                      key={d} 
+                                      onClick={() => handleToggleWorkingDay(d)}
+                                      className={`px-5 py-2.5 rounded-xl text-[11px] font-bold uppercase tracking-widest transition-all cursor-pointer border ${doctorInfo.workingDays?.includes(d) ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-400 border-slate-100 hover:border-blue-200'}`}
+                                   >
                                       {d}
                                    </div>
                                  ))}
@@ -733,7 +847,12 @@ const DoctorDashboard = () => {
                                  <div className="flex-1 space-y-2">
                                     <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Start Time</p>
                                     <div className="flex items-center justify-between p-4 bg-slate-50 border border-slate-100 rounded-2xl group focus-within:bg-white focus-within:border-blue-400 transition-all">
-                                       <span className="text-sm font-bold text-slate-700">10:00 AM</span>
+                                       <input 
+                                         type="time" 
+                                         value={doctorInfo.startTime || "09:00"} 
+                                         onChange={(e) => setDoctorInfo({...doctorInfo, startTime: e.target.value})}
+                                         className="bg-transparent text-sm font-bold text-slate-700 outline-none w-full"
+                                       />
                                        <Clock size={16} className="text-slate-300" />
                                     </div>
                                  </div>
@@ -741,7 +860,12 @@ const DoctorDashboard = () => {
                                  <div className="flex-1 space-y-2">
                                     <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">End Time</p>
                                     <div className="flex items-center justify-between p-4 bg-slate-50 border border-slate-100 rounded-2xl group focus-within:bg-white focus-within:border-blue-400 transition-all">
-                                       <span className="text-sm font-bold text-slate-700">04:00 PM</span>
+                                       <input 
+                                         type="time" 
+                                         value={doctorInfo.endTime || "17:00"} 
+                                         onChange={(e) => setDoctorInfo({...doctorInfo, endTime: e.target.value})}
+                                         className="bg-transparent text-sm font-bold text-slate-700 outline-none w-full"
+                                       />
                                        <Clock size={16} className="text-slate-300" />
                                     </div>
                                  </div>
@@ -752,11 +876,23 @@ const DoctorDashboard = () => {
                            <div className="grid grid-cols-2 gap-6">
                               <div className="space-y-2">
                                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Max Patients / Day</p>
-                                 <input type="text" className="w-full h-12 bg-slate-50 border border-slate-100 rounded-2xl px-6 text-sm font-bold text-slate-700 outline-none transition-all font-jakarta" placeholder="30" />
+                                 <input 
+                                   type="number" 
+                                   value={doctorInfo.maxPatients || 30} 
+                                   onChange={(e) => setDoctorInfo({...doctorInfo, maxPatients: parseInt(e.target.value)})}
+                                   className="w-full h-12 bg-slate-50 border border-slate-100 rounded-2xl px-6 text-sm font-bold text-slate-700 outline-none transition-all font-jakarta" 
+                                   placeholder="30" 
+                                 />
                               </div>
                               <div className="space-y-2">
                                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Avg. Consult Time (Min)</p>
-                                 <input type="text" className="w-full h-12 bg-slate-50 border border-slate-100 rounded-2xl px-6 text-sm font-bold text-slate-700 outline-none transition-all font-jakarta" placeholder="15" />
+                                 <input 
+                                   type="number" 
+                                   value={doctorInfo.avgConsultTime || 15} 
+                                   onChange={(e) => setDoctorInfo({...doctorInfo, avgConsultTime: parseInt(e.target.value)})}
+                                   className="w-full h-12 bg-slate-50 border border-slate-100 rounded-2xl px-6 text-sm font-bold text-slate-700 outline-none transition-all font-jakarta" 
+                                   placeholder="15" 
+                                 />
                               </div>
                            </div>
 
@@ -769,7 +905,18 @@ const DoctorDashboard = () => {
                               </div>
                            </div>
 
-                           <button className="w-full py-5 bg-[#0ea5e9] text-white rounded-[24px] text-sm font-black uppercase tracking-widest shadow-lg shadow-blue-500/20 active:scale-[0.98] transition-all">Save Settings</button>
+                           {saveStatus.show && (
+                              <div className={`p-4 rounded-2xl text-[10px] font-black uppercase tracking-widest text-center ${saveStatus.type === 'success' ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
+                                {saveStatus.message}
+                              </div>
+                           )}
+
+                           <button 
+                             onClick={handleSaveSettings}
+                             className="w-full py-5 bg-[#0ea5e9] text-white rounded-[24px] text-sm font-black uppercase tracking-widest shadow-lg shadow-blue-500/20 active:scale-[0.98] transition-all"
+                           >
+                             Save Settings
+                           </button>
                         </div>
                       </div>
 
@@ -952,6 +1099,13 @@ const DoctorDashboard = () => {
           scrollbar-width: none;
         }
       `}</style>
+        {/* Bottom Modals */}
+        <AppointmentDetailModal 
+          isOpen={isCalendarModalOpen} 
+          onClose={() => setIsCalendarModalOpen(false)}
+          appointments={selectedDateAppointments}
+          date={selectedDateLabel}
+        />
     </div>
   );
 };

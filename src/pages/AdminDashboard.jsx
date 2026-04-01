@@ -1,4 +1,7 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import axios from 'axios';
+import { io } from 'socket.io-client';
+
 import { AreaChart, Area, BarChart, Bar, Legend, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { motion } from 'framer-motion';
 import { Canvas, useFrame } from '@react-three/fiber';
@@ -50,19 +53,8 @@ const CustomTooltip = ({ active, payload, coordinate }) => {
   return null;
 };
 
-const activities = [
-  { id: 1, icon: <FaCheckCircle className="text-emerald-500" />, title: 'New Doctor Registered', time: '10 mins ago', desc: 'Dr. Sarah Jenkins completed onboarding.' },
-  { id: 2, icon: <FaExclamationTriangle className="text-amber-500" />, title: 'High Queue Alert', time: '1 hour ago', desc: 'Wait times exceeding 45 minutes in Cardiology.' },
-  { id: 3, icon: <FaInfoCircle className="text-blue-500" />, title: 'System Backup', time: '3 hours ago', desc: 'Automated database backup successful.' },
-];
+// statCards and stats are now fetched from MongoDB — see AdminDashboard component
 
-const statCards = [
-  { title: 'Total Patients', value: '12,480', growth: '+14%', color: 'from-blue-500 to-blue-600', icon: <FaUserInjured /> },
-  { title: 'Total Doctors', value: '45', growth: '+2%', color: 'from-emerald-500 to-emerald-600', icon: <FaUserMd /> },
-  { title: 'Appointments Today', value: '284', growth: '+8%', color: 'from-purple-500 to-purple-600', icon: <FaCalendarCheck /> },
-  { title: 'Pending Reports', value: '16', growth: '-5%', color: 'from-amber-500 to-amber-600', icon: <FaClipboardList /> },
-  { title: 'Avg. Wait Time', value: '18m', growth: '-12%', color: 'from-rose-500 to-rose-600', icon: <FaClock /> },
-];
 
 // --- 3D Character Implementation ---
 const AbstractDoctor3D = ({ isHovered }) => {
@@ -114,8 +106,21 @@ const AbstractDoctor3D = ({ isHovered }) => {
 
 // --- VIEW COMPONENTS ---
 
-const DashboardView = () => (
+const DashboardView = ({ stats = {} }) => {
+  const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+  const todayShort = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+  const statCards = [
+    { title: 'Total Patients', value: stats.totalPatients ?? '–', growth: '+live', color: 'from-blue-500 to-blue-600', icon: <FaUserInjured /> },
+    { title: 'Total Doctors', value: stats.totalDoctors ?? '–', growth: '+live', color: 'from-emerald-500 to-emerald-600', icon: <FaUserMd /> },
+    { title: 'Tokens Today', value: stats.tokensToday ?? '–', growth: '+live', color: 'from-purple-500 to-purple-600', icon: <FaCalendarCheck /> },
+    { title: 'Waiting Now', value: stats.waiting ?? '–', growth: '+live', color: 'from-amber-500 to-amber-600', icon: <FaClipboardList /> },
+    { title: 'Completed', value: stats.completed ?? '–', growth: '+live', color: 'from-teal-500 to-teal-600', icon: <FaCheckCircle /> },
+  ];
+
+  return (
   <div className="flex flex-col gap-8 opacity-0 animate-[fadeIn_0.4s_ease-in-out_forwards]">
+
     {/* Hero Banner (Dark Teal Gradient) */}
     <motion.div 
       initial={{ opacity: 0, y: 20 }}
@@ -128,7 +133,7 @@ const DashboardView = () => (
 
       <div className="relative z-10">
         <p className="text-teal-300 font-bold text-sm   mb-2 flex items-center gap-2">
-           <FaCalendarAlt /> Tuesday, March 24, 2026
+           <FaCalendarAlt /> {today}
         </p>
         <h2 className="text-2xl font-semibold text-white mb-8 ">Welcome back, {localStorage.getItem('userName') || 'Admin'}!</h2>
         
@@ -136,9 +141,10 @@ const DashboardView = () => (
         <div className="flex flex-wrap gap-4">
            {[
              { label: 'Clinic Status', value: 'Open', color: 'text-emerald-400' },
-             { label: 'Date', value: 'Mar 24', color: 'text-white' },
-             { label: 'On Duty', value: '6 Doctors', color: 'text-cyan-400' }
+             { label: 'Date', value: todayShort, color: 'text-white' },
+             { label: 'Doctors Online', value: stats.totalDoctors != null ? `${stats.totalDoctors} Doctors` : '-- Doctors', color: 'text-cyan-400' }
            ].map((pill, idx) => (
+
              <div key={idx} className="flex items-center gap-2 px-5 py-2.5 bg-white/10 backdrop-blur-md border border-white/10 rounded-[20px] shadow-[0_8px_30px_rgba(0,0,0,0.1)]">
                 <span className="text-slate-300 text-xs font-bold  tracking-wide">{pill.label}:</span>
                 <span className={`text-sm font-semibold ${pill.color}`}>{pill.value}</span>
@@ -276,7 +282,11 @@ const DashboardView = () => (
           <div className="relative">
              <div className="absolute top-0 bottom-0 left-[22px] w-[2px] bg-gray-100 rounded-full"></div>
              <div className="space-y-8 relative z-10">
-                {activities.map((act) => (
+                {[
+                    { id: 1, icon: <FaCheckCircle className="text-emerald-500" />, title: 'System Live', time: 'Now', desc: 'MongoDB connected. All data is real-time.' },
+                    { id: 2, icon: <FaInfoCircle className="text-blue-500" />, title: 'Database Sync', time: 'Today', desc: 'Patients, Doctors, and Queue data auto-sync on load.' },
+                    { id: 3, icon: <FaInfoCircle className="text-cyan-500" />, title: 'Token Queue Active', time: 'Ongoing', desc: 'Live queue updates emit via WebSocket on every change.' },
+                 ].map((act) => (
                    <div key={act.id} className="flex gap-6 group">
                       <div className="w-12 h-12 rounded-[16px] bg-white border border-gray-100 flex items-center justify-center text-xl shrink-0 shadow-sm relative z-10 group-hover:scale-110 group-hover:shadow-md transition-all duration-[400ms]">
                          {act.icon}
@@ -295,20 +305,18 @@ const DashboardView = () => (
        </div>
     </div>
   </div>
-);
+  );
+};
 
-const DoctorsView = () => {
+const DoctorsView = ({ doctors = [], stats = {} }) => {
   const [hoverDoc, setHoverDoc] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
 
-  const doctorsList = [
-    { id: '#DOC-001', name: 'Dr. Sarah Jenkins', special: 'Cardiologist', status: 'Active', exp: '12 Yrs' },
-    { id: '#DOC-002', name: 'Dr. Arvind Mehta', special: 'Neurologist', status: 'On Leave', exp: '8 Yrs' },
-    { id: '#DOC-003', name: 'Dr. John Mathew', special: 'General Physician', status: 'Active', exp: '15 Yrs' },
-    { id: '#DOC-004', name: 'Dr. Emily Chen', special: 'Pediatrician', status: 'Active', exp: '5 Yrs' },
-  ];
+  const filtered = doctors.filter(d => d.name.toLowerCase().includes(searchTerm.toLowerCase()));
 
   return (
     <div className="flex flex-col gap-8 opacity-0 animate-[fadeIn_0.4s_ease-in-out_forwards]">
+
       {/* Metric Row with 3D Interaction Zone */}
       <div className="grid grid-cols-3 gap-6">
         
@@ -323,7 +331,7 @@ const DoctorsView = () => {
                <FaUserMd />
              </div>
              <h3 className="text-gray-400 text-xs font-bold   mb-1">Total Doctors</h3>
-             <p className="text-3xl font-semibold text-gray-900 ">45</p>
+             <p className="text-3xl font-semibold text-gray-900 ">{doctors.length || '–'}</p>
           </div>
           
           {/* 3D Anchor Viewport */}
@@ -364,7 +372,7 @@ const DoctorsView = () => {
         <div className="p-6 border-b border-gray-100 flex items-center gap-4 bg-gray-50/50">
            <div className="relative flex-1 max-w-[400px]">
               <FaSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
-              <input type="text" placeholder="Search by name or ID..." className="w-full pl-12 pr-4 py-3 bg-white border border-gray-200 rounded-[16px] text-sm font-bold text-gray-700 focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 transition-all" />
+              <input type="text" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Search by name or specialization..." className="w-full pl-12 pr-4 py-3 bg-white border border-gray-200 rounded-[16px] text-sm font-bold text-gray-700 focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 transition-all" />
            </div>
            <button className="px-6 py-3 bg-white border border-gray-200 rounded-[16px] text-sm font-bold text-gray-700 hover:bg-gray-50 transition-colors">
               Filter Status
@@ -386,25 +394,33 @@ const DoctorsView = () => {
             </tr>
           </thead>
           <tbody className="text-sm font-semibold text-gray-900">
-             {doctorsList.map((doc, idx) => (
-                <tr key={idx} className="border-b border-gray-50 hover:bg-gray-50/80 transition-colors duration-[400ms] group">
-                   <td className="p-6 text-gray-500 font-medium">{doc.id}</td>
+             {filtered.length === 0 ? (
+                <tr><td colSpan={6} className="p-16 text-center">
+                  <div className="flex flex-col items-center gap-4">
+                    <div className="w-16 h-16 bg-gray-50 rounded-[20px] flex items-center justify-center border-2 border-dashed border-gray-200"><FaUserMd className="text-2xl text-gray-300" /></div>
+                    <p className="text-sm font-bold text-gray-400 uppercase tracking-widest">No Doctors Registered Yet</p>
+                    <p className="text-xs text-gray-300">Doctors will appear here once they register.</p>
+                  </div>
+                </td></tr>
+             ) : filtered.map((doc, idx) => (
+                <tr key={doc._id || idx} className="border-b border-gray-50 hover:bg-gray-50/80 transition-colors duration-[400ms] group">
+                   <td className="p-6 text-gray-500 font-medium">{doc._id ? doc._id.toString().slice(-6).toUpperCase() : '--'}</td>
                    <td className="p-6 font-bold flex items-center gap-4">
                      <div className="w-10 h-10 rounded-full bg-teal-50 text-teal-700 flex items-center justify-center font-bold text-sm shadow-sm border border-teal-100">
-                        {doc.name.match(/\b(\w)/g).slice(0,2).join('')}
+                        {(doc.name || '').match(/\b(\w)/g)?.slice(0,2).join('') || '??'}
                      </div>
-                     {doc.name}
+                     {doc.name || 'Unknown'}
                    </td>
-                   <td className="p-6 text-gray-600">{doc.special}</td>
+                   <td className="p-6 text-gray-600">{doc.specialization || 'General'}</td>
                    <td className="p-6">
-                      <span className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold border ${doc.status === 'Active' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-amber-50 text-amber-700 border-amber-100'}`}>
-                         <div className={`w-1.5 h-1.5 rounded-full ${doc.status === 'Active' ? 'bg-emerald-500' : 'bg-amber-500'}`}></div>
-                         {doc.status}
+                      <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold border bg-emerald-50 text-emerald-700 border-emerald-100">
+                         <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
+                         Active
                       </span>
                    </td>
-                   <td className="p-6 text-gray-500">{doc.exp}</td>
+                   <td className="p-6 text-gray-500">{doc.degree || '--'}</td>
                    <td className="p-6 text-right">
-                      <button className="text-gray-400 hover:text-teal-600 transition-colors font-bold px-3 opacity-0 group-hover:opacity-100">Edit Profile</button>
+                      <button className="text-gray-400 hover:text-teal-600 transition-colors font-bold px-3 opacity-0 group-hover:opacity-100">View Profile</button>
                    </td>
                 </tr>
              ))}
@@ -415,19 +431,24 @@ const DoctorsView = () => {
   );
 };
 
-const PatientsView = () => {
-  const patientStats = [
-    { title: 'Total Patients', value: '12', color: 'from-cyan-400 to-cyan-500', icon: <FaUserInjured /> },
-    { title: 'Active', value: '9', color: 'from-emerald-400 to-emerald-500', icon: <FaCheckCircle /> },
-    { title: 'Female', value: '6', color: 'from-purple-400 to-purple-500', icon: <FaVenus /> },
-    { title: 'Male', value: '6', color: 'from-blue-400 to-blue-500', icon: <FaMars /> },
-  ];
+const PatientsView = ({ patients = [] }) => {
+  const [search, setSearch] = useState('');
+  const [genderFilter, setGenderFilter] = useState('All');
 
-  const patientsList = [
-    { id: '#P001', name: 'Sarah Jenkins', age: 34, gender: 'Female', phone: '+1 234 567 8900', email: 'sarah.j@email.com', doctor: 'Dr. Emily Chen', spec: 'Pediatrician', lastVisit: 'Mar 18, 2026', status: 'Active' },
-    { id: '#P002', name: 'Michael Chang', age: 45, gender: 'Male', phone: '+1 987 654 3210', email: 'm.chang@email.com', doctor: 'Dr. Arvind Mehta', spec: 'Neurologist', lastVisit: 'Mar 20, 2026', status: 'Inactive' },
-    { id: '#P003', name: 'Emma Watson', age: 28, gender: 'Female', phone: '+1 555 123 4567', email: 'emma.w@email.com', doctor: 'Dr. Sarah Jenkins', spec: 'Cardiologist', lastVisit: 'Mar 22, 2026', status: 'Active' },
-    { id: '#P004', name: 'David Miller', age: 52, gender: 'Male', phone: '+1 444 987 6543', email: 'david.m@email.com', doctor: 'Dr. John Mathew', spec: 'General Physician', lastVisit: 'Mar 23, 2026', status: 'Active' },
+  const filtered = patients.filter(p => {
+    const matchSearch = !search || p.name.toLowerCase().includes(search.toLowerCase()) || (p.id || '').toLowerCase().includes(search.toLowerCase());
+    const matchGender = genderFilter === 'All' || p.gender === genderFilter;
+    return matchSearch && matchGender;
+  });
+
+  const femaleCount = patients.filter(p => p.gender === 'Female').length;
+  const maleCount = patients.filter(p => p.gender === 'Male').length;
+
+  const patientStats = [
+    { title: 'Total Patients', value: patients.length || '–', color: 'from-cyan-400 to-cyan-500', icon: <FaUserInjured /> },
+    { title: 'Active', value: patients.length || '–', color: 'from-emerald-400 to-emerald-500', icon: <FaCheckCircle /> },
+    { title: 'Female', value: femaleCount || '–', color: 'from-purple-400 to-purple-500', icon: <FaVenus /> },
+    { title: 'Male', value: maleCount || '–', color: 'from-blue-400 to-blue-500', icon: <FaMars /> },
   ];
 
   return (
@@ -451,7 +472,7 @@ const PatientsView = () => {
       <div className="bg-white rounded-[20px] p-4 shadow-[0_10px_40px_-10px_rgba(0,0,0,0.06)] flex flex-wrap items-center gap-6">
         <div className="relative flex-1 min-w-[300px] max-w-[400px]">
           <FaSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input type="text" placeholder="Search name, ID, doctor, contact..." className="w-full pl-12 pr-4 py-3 bg-gray-50 border-none rounded-[16px] text-sm font-bold text-gray-700 focus:outline-none focus:ring-2 focus:ring-cyan-500/20 transition-all duration-[400ms]" />
+          <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name, ID, contact..." className="w-full pl-12 pr-4 py-3 bg-gray-50 border-none rounded-[16px] text-sm font-bold text-gray-700 focus:outline-none focus:ring-2 focus:ring-cyan-500/20 transition-all duration-[400ms]" />
         </div>
         
         <div className="flex items-center gap-2 bg-gray-50 p-1.5 rounded-[16px]">
@@ -462,7 +483,7 @@ const PatientsView = () => {
 
         <div className="flex items-center gap-2 bg-gray-50 p-1.5 rounded-[16px]">
           {['All', 'Male', 'Female'].map(filter => (
-            <button key={filter} className={`px-4 py-3 rounded-[12px] text-xs font-bold transition-all duration-[400ms] ${filter === 'All' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}>{filter}</button>
+            <button key={filter} onClick={() => setGenderFilter(filter)} className={`px-4 py-3 rounded-[12px] text-xs font-bold transition-all duration-[400ms] ${filter === genderFilter ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}>{filter}</button>
           ))}
         </div>
 
@@ -486,42 +507,47 @@ const PatientsView = () => {
             </tr>
           </thead>
           <tbody className="text-sm font-semibold text-gray-900">
-             {patientsList.map((patient, idx) => (
-                <tr key={idx} className="border-b border-gray-50 hover:bg-gray-50/80 transition-colors duration-[400ms] ease-in-out group">
+             {filtered.length === 0 ? (
+                <tr><td colSpan={7} className="p-16 text-center">
+                  <div className="flex flex-col items-center gap-4">
+                    <div className="w-16 h-16 bg-gray-50 rounded-[20px] flex items-center justify-center border-2 border-dashed border-gray-200"><FaUserInjured className="text-2xl text-gray-300" /></div>
+                    <p className="text-sm font-bold text-gray-400 uppercase tracking-widest">No Patients Found</p>
+                    <p className="text-xs text-gray-300">{search ? 'Try a different search term.' : 'Patients will appear here once they register.'}</p>
+                  </div>
+                </td></tr>
+             ) : filtered.map((patient, idx) => (
+                <tr key={patient._id || idx} className="border-b border-gray-50 hover:bg-gray-50/80 transition-colors duration-[400ms] ease-in-out group">
                    <td className="p-6 flex items-center gap-4">
                      <div className="w-10 h-10 rounded-full bg-indigo-50 text-indigo-700 flex items-center justify-center font-bold text-sm shadow-sm border border-indigo-100">
-                        {patient.name.match(/\b(\w)/g).slice(0,2).join('')}
+                        {(patient.name || '').match(/\b(\w)/g)?.slice(0,2).join('') || '??'}
                      </div>
                      <div>
                         <p className="font-bold text-gray-900">{patient.name}</p>
-                        <p className="text-xs text-gray-400 font-bold">{patient.id}</p>
+                        <p className="text-xs text-gray-400 font-bold">{patient.id || patient._id?.toString().slice(-6)}</p>
                      </div>
                    </td>
                    <td className="p-6">
                       <div className="flex items-center gap-3">
-                         <span className="text-gray-600 font-bold">{patient.age} yrs</span>
-                         <span className={`px-3 py-1 rounded-full text-xs font-bold   ${patient.gender === 'Female' ? 'bg-pink-100 text-pink-600' : 'bg-blue-100 text-blue-600'}`}>
-                            {patient.gender}
+                         <span className="text-gray-600 font-bold">{patient.age !== '--' ? patient.age + ' yrs' : '--'}</span>
+                         <span className={`px-3 py-1 rounded-full text-xs font-bold ${patient.gender === 'Female' ? 'bg-pink-100 text-pink-600' : patient.gender === 'Male' ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-500'}`}>
+                            {patient.gender || '--'}
                          </span>
                       </div>
                    </td>
                    <td className="p-6">
                       <div className="flex flex-col gap-1">
-                         <span className="text-gray-700 font-bold flex items-center gap-2"><FaPhone className="text-gray-400 text-xs" /> {patient.phone}</span>
-                         <span className="text-xs text-gray-500 font-medium flex items-center gap-2"><FaEnvelope className="text-gray-400 text-xs" /> {patient.email}</span>
+                         <span className="text-gray-700 font-bold flex items-center gap-2"><FaPhone className="text-gray-400 text-xs" /> {patient.contact || '--'}</span>
+                         <span className="text-xs text-gray-500 font-medium flex items-center gap-2"><FaEnvelope className="text-gray-400 text-xs" /> {patient.email || '--'}</span>
                       </div>
                    </td>
                    <td className="p-6">
-                      <div className="flex flex-col gap-1">
-                         <span className="text-gray-900 font-bold">{patient.doctor}</span>
-                         <span className="text-xs text-gray-500 font-medium">{patient.spec}</span>
-                      </div>
+                      <span className="text-gray-400 text-xs font-medium italic">Not assigned</span>
                    </td>
-                   <td className="p-6 text-gray-600 font-bold">{patient.lastVisit}</td>
+                   <td className="p-6 text-gray-600 font-bold">{patient.lastVisit || '--'}</td>
                    <td className="p-6">
-                      <span className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold border ${patient.status === 'Active' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-gray-50 text-gray-600 border-gray-200'}`}>
-                         <div className={`w-1.5 h-1.5 rounded-full ${patient.status === 'Active' ? 'bg-emerald-500' : 'bg-gray-400'}`}></div>
-                         {patient.status}
+                      <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold border bg-emerald-50 text-emerald-700 border-emerald-100">
+                         <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
+                         Active
                       </span>
                    </td>
                    <td className="p-6">
@@ -740,20 +766,52 @@ const ReportsView = () => {
 };
 
 
-const QueueView = () => {
-  const queueStats = [
-    { title: 'Total Tokens', value: '12', color: 'from-slate-400 to-slate-500', icon: <FaTicketAlt /> },
-    { title: 'Waiting', value: '8', color: 'from-amber-400 to-amber-500', icon: <FaClock /> },
-    { title: 'In Progress', value: '1', color: 'from-cyan-400 to-cyan-500', icon: <FaSync /> },
-    { title: 'Completed', value: '2', color: 'from-emerald-400 to-emerald-500', icon: <FaCheckCircle /> },
-    { title: 'Cancelled', value: '1', color: 'from-rose-400 to-rose-500', icon: <FaTimesCircle /> },
-  ];
+const QueueView = ({ queue = [], queueStats = {}, patients = [], doctors = [], onUpdateStatus, onGenerateToken }) => {
+  const [searchQ, setSearchQ] = useState('');
+  const [activeFilter, setActiveFilter] = useState('All');
+  const [selPatient, setSelPatient] = useState('');
+  const [selDoctor, setSelDoctor] = useState('');
+  const [selDept, setSelDept] = useState('');
+  const [generating, setGenerating] = useState(false);
+  const [genMsg, setGenMsg] = useState('');
 
-  const liveQueue = [
-    { id: 'A-001', patient: 'Sarah Jenkins', pid: '#P001', doctor: 'Dr. Emily Chen', time: '09:00 AM - 09:30 AM', issued: '08:45 AM', status: 'In Progress' },
-    { id: 'A-002', patient: 'Michael Chang', pid: '#P002', doctor: 'Dr. Arvind Mehta', time: '09:30 AM - 10:00 AM', issued: '08:50 AM', status: 'Waiting' },
-    { id: 'A-003', patient: 'Emma Watson', pid: '#P003', doctor: 'Dr. Sarah Jenkins', time: '10:00 AM - 10:30 AM', issued: '09:15 AM', status: 'Waiting' },
-    { id: 'A-000', patient: 'David Miller', pid: '#P004', doctor: 'Dr. John Mathew', time: '08:30 AM - 09:00 AM', issued: '08:10 AM', status: 'Completed' },
+  const DEPARTMENTS = ['General', 'Cardiology', 'Neurology', 'Pediatrics', 'Orthopedics', 'Dermatology', 'ENT', 'Gynecology'];
+
+  const filteredQueue = queue.filter(item => {
+    const patientName = item.patientId?.name || item.userName || '';
+    const doctorName = item.doctorId?.name || item.doctor || '';
+    const matchSearch = !searchQ || patientName.toLowerCase().includes(searchQ.toLowerCase()) || (item.tokenId || '').toLowerCase().includes(searchQ.toLowerCase());
+    const itemStatus = item.status === 'pending' ? 'Waiting' :
+                       item.status === 'Now Serving' ? 'In Progress' : item.status;
+    const matchFilter = activeFilter === 'All' || itemStatus === activeFilter;
+    return matchSearch && matchFilter;
+  });
+
+  const handleGenerateToken = async () => {
+    if (!selPatient || !selDoctor || !selDept) {
+      setGenMsg('Please select all fields.');
+      return;
+    }
+    setGenerating(true);
+    setGenMsg('');
+    try {
+      await onGenerateToken({ patientId: selPatient, doctorId: selDoctor, department: selDept });
+      setSelPatient(''); setSelDoctor(''); setSelDept('');
+      setGenMsg('Token generated successfully!');
+      setTimeout(() => setGenMsg(''), 3000);
+    } catch(e) {
+      setGenMsg('Failed to generate token.');
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const dynQueueStats = [
+    { title: 'Total Tokens', value: queueStats.total ?? 0, color: 'from-slate-400 to-slate-500', icon: <FaTicketAlt /> },
+    { title: 'Waiting', value: queueStats.waiting ?? 0, color: 'from-amber-400 to-amber-500', icon: <FaClock /> },
+    { title: 'In Progress', value: queueStats.inProgress ?? 0, color: 'from-cyan-400 to-cyan-500', icon: <FaSync /> },
+    { title: 'Completed', value: queueStats.completed ?? 0, color: 'from-emerald-400 to-emerald-500', icon: <FaCheckCircle /> },
+    { title: 'Cancelled', value: queueStats.cancelled ?? 0, color: 'from-rose-400 to-rose-500', icon: <FaTimesCircle /> },
   ];
 
   const getStatusStyle = (status) => {
@@ -769,7 +827,7 @@ const QueueView = () => {
     <div className="flex flex-col gap-8 opacity-0 animate-[fadeIn_0.4s_ease-in-out_forwards]">
       {/* Metric Row */}
       <div className="grid grid-cols-5 gap-6">
-        {queueStats.map((stat, idx) => (
+        {dynQueueStats.map((stat, idx) => (
           <div key={idx} className="bg-white rounded-[16px] p-5 shadow-[0_8px_30px_rgb(0,0,0,0.04)] flex items-center justify-between hover:-translate-y-1 transition-transform duration-[400ms] ease-in-out cursor-pointer group">
             <div>
                <p className="text-3xl font-semibold text-gray-900  mb-1">{stat.value}</p>
@@ -794,7 +852,7 @@ const QueueView = () => {
                    <h2 className="text-lg font-bold text-gray-900  whitespace-nowrap">Live Queue</h2>
                    <div className="relative w-full max-w-[300px]">
                      <FaSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
-                     <input type="text" placeholder="Search patient or token..." className="w-full pl-12 pr-4 py-2.5 bg-white border border-gray-200 rounded-[12px] text-sm font-bold text-gray-700 focus:outline-none focus:ring-2 focus:ring-cyan-500/20 transition-all duration-[400ms]" />
+                     <input type="text" value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="Search patient or token..." className="w-full pl-12 pr-4 py-2.5 bg-white border border-gray-200 rounded-[12px] text-sm font-bold text-gray-700 focus:outline-none focus:ring-2 focus:ring-cyan-500/20 transition-all duration-[400ms]" />
                    </div>
                 </div>
                 
@@ -818,43 +876,56 @@ const QueueView = () => {
                  </tr>
                </thead>
                <tbody className="text-sm font-semibold text-gray-900">
-                  {liveQueue.map((item, idx) => {
-                     const st = getStatusStyle(item.status);
+                  {filteredQueue.length === 0 ? (
+                  <tr><td colSpan={6} className="p-16 text-center">
+                    <div className="flex flex-col items-center gap-4">
+                      <div className="w-16 h-16 bg-gray-50 rounded-[20px] flex items-center justify-center border-2 border-dashed border-gray-200"><FaTicketAlt className="text-2xl text-gray-300" /></div>
+                      <p className="text-sm font-bold text-gray-400 uppercase tracking-widest">No Active Records Found</p>
+                      <p className="text-xs text-gray-300">The live queue is currently empty. Generate a token to get started.</p>
+                    </div>
+                  </td></tr>
+               ) : filteredQueue.map((item, idx) => {
+                     const displayStatus = item.status === 'pending' ? 'Waiting' : item.status === 'Now Serving' ? 'In Progress' : item.status;
+                     const st = getStatusStyle(displayStatus);
+                     const patientName = item.patientId?.name || item.userName || 'Unknown';
+                     const patientId = item.patientId?.patientId || '--';
+                     const doctorName = item.doctorId?.name || item.doctor || '--';
+                     const issued = item.createdAt ? new Date(item.createdAt).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '--';
                      return (
-                     <tr key={idx} className="border-b border-gray-50 hover:bg-gray-50/80 transition-colors duration-[400ms] ease-in-out group">
+                     <tr key={item._id || idx} className="border-b border-gray-50 hover:bg-gray-50/80 transition-colors duration-[400ms] ease-in-out group">
                         <td className="p-6">
-                           <div className="px-3 py-1.5 bg-slate-100 border border-slate-200 text-slate-700 rounded-[10px] text-xs font-bold inline-block ">
-                              {item.id}
+                           <div className="px-3 py-1.5 bg-slate-100 border border-slate-200 text-slate-700 rounded-[10px] text-xs font-bold inline-block">
+                              {item.tokenId || '--'}
                            </div>
                         </td>
                         <td className="p-6">
-                           <p className="font-bold text-gray-900">{item.patient}</p>
-                           <p className="text-xs text-gray-400 font-bold">{item.pid}</p>
+                           <p className="font-bold text-gray-900">{patientName}</p>
+                           <p className="text-xs text-gray-400 font-bold">{patientId}</p>
                         </td>
                         <td className="p-6">
                            <div className="flex items-center gap-3">
                               <div className="w-8 h-8 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center font-bold text-xs">
-                                 {item.doctor.split(' ').map(n=>n[0]).join('').replace('D','')}
+                                 {doctorName.split(' ').map(n=>n[0]).join('').replace('D','').slice(0,2)}
                               </div>
-                              <span className="font-bold text-gray-700">{item.doctor}</span>
+                              <span className="font-bold text-gray-700">{doctorName}</span>
                            </div>
                         </td>
                         <td className="p-6">
-                           <p className="font-bold text-gray-800">{item.time}</p>
-                           <p className="text-xs text-gray-400 font-bold mt-0.5">Issued: {item.issued}</p>
+                           <p className="font-bold text-gray-800">{item.bookedTime || '--'}</p>
+                           <p className="text-xs text-gray-400 font-bold mt-0.5">Issued: {issued}</p>
                         </td>
                         <td className="p-6">
                            <span className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold border ${st.bg} ${st.text} ${st.border}`}>
                               {st.icon}
-                              {item.status}
+                              {displayStatus}
                            </span>
                         </td>
                         <td className="p-6">
                            <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-[400ms] ease-in-out">
-                              <button className="w-8 h-8 rounded-[10px] bg-white border border-gray-200 flex items-center justify-center text-emerald-500 hover:text-white hover:bg-emerald-500 hover:border-emerald-500 transition-all duration-[400ms]" title="Complete">
+                              <button onClick={() => onUpdateStatus(item._id, 'Completed')} className="w-8 h-8 rounded-[10px] bg-white border border-gray-200 flex items-center justify-center text-emerald-500 hover:text-white hover:bg-emerald-500 hover:border-emerald-500 transition-all duration-[400ms]" title="Mark Complete">
                                  <FaCheck />
                               </button>
-                              <button className="w-8 h-8 rounded-[10px] bg-white border border-gray-200 flex items-center justify-center text-rose-500 hover:text-white hover:bg-rose-500 hover:border-rose-500 transition-all duration-[400ms]" title="Cancel">
+                              <button onClick={() => onUpdateStatus(item._id, 'Cancelled')} className="w-8 h-8 rounded-[10px] bg-white border border-gray-200 flex items-center justify-center text-rose-500 hover:text-white hover:bg-rose-500 hover:border-rose-500 transition-all duration-[400ms]" title="Cancel">
                                  <FaTimes />
                               </button>
                            </div>
@@ -1431,7 +1502,64 @@ const ProfileView = () => (
 // --- MAIN LAYOUT ---
 
 const AdminDashboard = () => {
-  const [activeTab, setActiveTab] = useState('profile'); // defaulting to profile to show the new view
+  const [activeTab, setActiveTab] = useState('dashboard');
+
+  // ===== REAL DATA STATE =====
+  const [doctors, setDoctors] = useState([]);
+  const [patients, setPatients] = useState([]);
+  const [queue, setQueue] = useState([]);
+  const [queueStats, setQueueStats] = useState({});
+  const [dashboardStats, setDashboardStats] = useState({});
+  const [loading, setLoading] = useState(true);
+
+  const fetchAll = async () => {
+    try {
+      const [doctorsRes, patientsRes, queueRes, summaryRes] = await Promise.all([
+        axios.get('/api/doctors').catch(() => ({ data: [] })),
+        axios.get('/api/patients').catch(() => ({ data: [] })),
+        axios.get('/api/admin/queue').catch(() => ({ data: { tokens: [], stats: {} } })),
+        axios.get('/api/admin/summary').catch(() => ({ data: {} })),
+      ]);
+
+      setDoctors(doctorsRes.data || []);
+      setPatients(patientsRes.data || []);
+      setQueue(queueRes.data?.tokens || []);
+      setQueueStats(queueRes.data?.stats || {});
+      setDashboardStats({
+        totalPatients: summaryRes.data?.totalPatients ?? 0,
+        totalDoctors: summaryRes.data?.totalDoctors ?? 0,
+        tokensToday: queueRes.data?.stats?.total ?? 0,
+        waiting: queueRes.data?.stats?.waiting ?? 0,
+        completed: queueRes.data?.stats?.completed ?? 0,
+      });
+    } catch (err) {
+      console.error('Admin fetch error:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchAll();
+    // WebSocket for real-time queue updates
+    const socket = io('http://localhost:5001');
+    socket.on('queueUpdate', () => fetchAll());
+    return () => socket.disconnect();
+  }, []);
+
+  const handleUpdateStatus = async (id, status) => {
+    try {
+      await axios.patch(`/api/admin/queue/${id}`, { status });
+      fetchAll(); // Refresh queue
+    } catch(err) {
+      console.error('Status update failed:', err);
+    }
+  };
+
+  const handleGenerateToken = async (payload) => {
+    await axios.post('/api/admin/token', payload);
+    fetchAll();
+  };
 
   const navItems = [
     { id: 'dashboard', icon: <FaChartLine />, label: 'Dashboard' },
@@ -1528,7 +1656,8 @@ const AdminDashboard = () => {
           </div>
 
           {/* Router View Engine */}
-          {activeTab === 'dashboard' ? <DashboardView /> : activeTab === 'doctors' ? <DoctorsView /> : activeTab === 'patients' ? <PatientsView /> : activeTab === 'queue' ? <QueueView /> : activeTab === 'reports' ? <ReportsView /> : activeTab === 'analytics' ? <AnalyticsView /> : activeTab === 'settings' ? <SettingsView /> : activeTab === 'profile' ? <ProfileView /> : (
+          {loading && <div className="flex items-center justify-center py-32"><div className="w-10 h-10 border-4 border-cyan-400 border-t-transparent rounded-full animate-spin"></div></div>}
+          {!loading && (activeTab === 'dashboard' ? <DashboardView stats={dashboardStats} /> : activeTab === 'doctors' ? <DoctorsView doctors={doctors} stats={dashboardStats} /> : activeTab === 'patients' ? <PatientsView patients={patients} /> : activeTab === 'queue' ? <QueueView queue={queue} queueStats={queueStats} patients={patients} doctors={doctors} onUpdateStatus={handleUpdateStatus} onGenerateToken={handleGenerateToken} /> : activeTab === 'reports' ? <ReportsView /> : activeTab === 'analytics' ? <AnalyticsView /> : activeTab === 'settings' ? <SettingsView /> : activeTab === 'profile' ? <ProfileView /> : (
             <div className="flex-1 flex flex-col items-center justify-center py-32 text-center opacity-0 animate-[fadeIn_0.5s_ease-out_forwards]">
                <div className="w-24 h-24 bg-gray-50 rounded-[32px] flex items-center justify-center mb-6 border-2 border-dashed border-gray-200">
                   <FaCog className="text-2xl text-gray-300" />
@@ -1536,7 +1665,7 @@ const AdminDashboard = () => {
                <h3 className="text-2xl font-semibold text-gray-900 mb-2 capitalize">{activeTab} Interface</h3>
                <p className="text-gray-400 font-medium max-w-sm">This module is currently receiving a high-fidelity visual pass. It will be available shortly.</p>
             </div>
-          )}
+          ))}
 
         </div>
       </main>
