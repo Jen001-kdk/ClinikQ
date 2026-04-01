@@ -9,7 +9,8 @@ import {
   FaFileMedical, FaUserCircle, FaChartLine, FaMapMarkerAlt,
   FaExclamationCircle, FaInfoCircle, FaCalendarCheck, FaHeart, FaCog, FaBuilding, FaTicketAlt, FaChevronRight, FaTimesCircle
 } from 'react-icons/fa';
-import PatientProfile from '../components/PatientProfile';
+import PatientProfile from '../../components/profile/PatientProfile';
+import StatusModal from '../../components/dashboard/StatusModal';
 
 // Sub-component for Appointment Card with liquid-smooth transitions
 const AppointmentCard = ({ app, onCancel }) => {
@@ -138,7 +139,7 @@ const RollingNumber = ({ value }) => {
   return <span>{displayValue}</span>;
 };
 
-const PatientsDashboard = ({ initialTab = 'dashboard' }) => {
+const PatientDashboard = ({ initialTab = 'dashboard' }) => {
 
 
   const navigate = useNavigate();
@@ -178,6 +179,15 @@ const PatientsDashboard = ({ initialTab = 'dashboard' }) => {
   });
 
   const [currentTime, setCurrentTime] = useState(new Date());
+
+  const [statusModal, setStatusModal] = useState({
+    isOpen: false,
+    title: '',
+    message: '',
+    type: 'error'
+  });
+
+  const closeStatusModal = () => setStatusModal(prev => ({ ...prev, isOpen: false }));
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -228,10 +238,13 @@ const PatientsDashboard = ({ initialTab = 'dashboard' }) => {
               icon: "/favicon.ico",
               silent: false,
               requireInteraction: true
-           });
-        } else {
-           alert(data.message);
-        }
+            setStatusModal({
+              isOpen: true,
+              title: 'New Notification',
+              message: data.message,
+              type: 'info'
+            });
+         }
       }
     });
 
@@ -343,7 +356,12 @@ const PatientsDashboard = ({ initialTab = 'dashboard' }) => {
        const dayName = d.toLocaleDateString('en-GB', { weekday: 'short' });
        
        if (!selectedDoctor.workingDays.includes(dayName)) {
-          alert(`Alert: Dr. ${formData.doctor} is not available on ${dayName} (${formattedDate}). Please select another day.`);
+          setStatusModal({
+            isOpen: true,
+            title: 'Schedule Conflict',
+            message: `Dr. ${formData.doctor} is not available on ${dayName} (${formattedDate}). Please select another clinical day.`,
+            type: 'warning'
+          });
           return;
        }
     }
@@ -367,7 +385,12 @@ const PatientsDashboard = ({ initialTab = 'dashboard' }) => {
     } catch (err) {
       console.error("Booking error:", err);
       const errorMsg = err.response?.data?.error || "Failed to book token. Please try again.";
-      alert(errorMsg);
+      setStatusModal({
+        isOpen: true,
+        title: 'Booking Failed',
+        message: errorMsg,
+        type: 'error'
+      });
       setBookingLoading(false);
     }
   };
@@ -1143,8 +1166,15 @@ const PatientsDashboard = ({ initialTab = 'dashboard' }) => {
            )}
         </div>
       </main>
+      <StatusModal 
+        isOpen={statusModal.isOpen} 
+        onClose={closeStatusModal}
+        title={statusModal.title}
+        message={statusModal.message}
+        type={statusModal.type}
+      />
     </div>
   );
 };
 
-export default PatientsDashboard;
+export default PatientDashboard;

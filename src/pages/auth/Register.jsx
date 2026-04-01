@@ -7,7 +7,8 @@ import {
   FaIdCard, FaPills, FaHeartbeat, FaBandAid
 } from 'react-icons/fa';
 import axios from 'axios';
-import ErrorToast from '../components/ErrorToast';
+import ErrorToast from '../../components/ErrorToast';
+import StatusModal from '../../components/dashboard/StatusModal';
 
 // --- Floating Background Component ---
 const FloatingBackground = ({ role }) => {
@@ -23,7 +24,7 @@ const FloatingBackground = ({ role }) => {
       size: Math.random() * 15 + 15,
       duration: Math.random() * 6 + 4,
       delay: Math.random() * 5,
-      color: role === 'doctor' ? '#06B6D415' : '#0D948815' // Cyan for Doctor, Teal for Patient
+      color: role === 'doctor' ? '#06B6D415' : '#0D948815'
     }));
     setIcons(generatedIcons);
   }, [role]);
@@ -51,7 +52,7 @@ const InputField = ({ label, icon: Icon, ...props }) => (
       {label}
     </label>
     <div className="relative group">
-      <div className="absolute left-4 top-1/2 -translate-y-1/2 text-[#94A3B8] group-focus-within:text-[#0D9488] transition-all duration-300">
+      <div className="absolute left-4 top-1/2 -translate-y-1/2 text-[#94A3B8] group-focus-within:text-[#0D9488] transition-all duration-300 pointer-events-none">
         <Icon size={14} />
       </div>
       <input
@@ -89,9 +90,23 @@ const SelectField = ({ label, icon: Icon, options, ...props }) => (
 
 const Register = () => {
   const navigate = useNavigate();
-  const [role, setRole] = useState('patient'); // 'patient' or 'doctor'
+  const [role, setRole] = useState('patient');
   const [showError, setShowError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+
+  const [statusModal, setStatusModal] = useState({
+    isOpen: false,
+    title: '',
+    message: '',
+    type: 'success'
+  });
+
+  const closeStatusModal = () => {
+    setStatusModal(prev => ({ ...prev, isOpen: false }));
+    if (statusModal.type === 'success') {
+      navigate('/login');
+    }
+  };
   
   const [formData, setFormData] = useState({
     name: '', email: '', password: '', confirmPassword: '',
@@ -106,7 +121,6 @@ const Register = () => {
   const handleRegister = async (e) => {
     e.preventDefault();
     
-    // Validation: Check for empty fields
     const requiredFields = role === 'patient' 
       ? ['name', 'email', 'password', 'confirmPassword', 'age', 'gender', 'bloodType', 'contact', 'address']
       : ['name', 'email', 'password', 'confirmPassword', 'degree', 'specialization', 'license'];
@@ -130,8 +144,12 @@ const Register = () => {
       const response = await axios.post('http://localhost:5001/api/register', payload);
       
       if (response.status === 201) {
-        alert("Account established! Please sign in.");
-        navigate('/login');
+        setStatusModal({
+          isOpen: true,
+          title: 'Account Established',
+          message: 'Your medical profile has been successfully created. You can now sign in to your dashboard.',
+          type: 'success'
+        });
       }
     } catch (error) {
       console.error("Registration error:", error);
@@ -157,14 +175,12 @@ const Register = () => {
         transition={{ duration: 0.45, ease: "easeInOut" }}
         className="w-full max-w-[800px] bg-white rounded-[24px] shadow-[0_30px_70px_-20px_rgba(15,23,42,0.12)] border border-white relative z-10 p-12 flex flex-col gap-10"
       >
-        {/* Top Header */}
         <div className="flex flex-col items-center">
           <div className="text-3xl font-black text-[#9d4ead] italic mb-3 tracking-tighter">ClinikQ</div>
           <h1 className="text-2xl font-black text-[#1E293B]">Access Patient Portal</h1>
           <p className="text-xs font-bold text-[#64748B] mt-2 uppercase tracking-[0.2em]">Join our medical network</p>
         </div>
 
-        {/* Role Toggle Pill */}
         <div className="flex justify-center">
           <div className="bg-[#F1F5F9] p-1.5 rounded-[18px] flex relative w-full max-w-[320px] shadow-inner">
             <motion.div 
@@ -189,7 +205,6 @@ const Register = () => {
           </div>
         </div>
 
-        {/* Cross-fade Form Content */}
         <form onSubmit={handleRegister} className="flex flex-col gap-8">
           <AnimatePresence mode="wait">
             {role === 'patient' ? (
@@ -269,6 +284,13 @@ const Register = () => {
           Already registered? <Link to="/login" className="text-[#0D9488] font-black hover:underline hover:text-[#0F766E] transition-colors ml-1">Sign in to your panel</Link>
         </p>
       </motion.div>
+      <StatusModal 
+        isOpen={statusModal.isOpen} 
+        onClose={closeStatusModal}
+        title={statusModal.title}
+        message={statusModal.message}
+        type={statusModal.type}
+      />
     </div>
   );
 };

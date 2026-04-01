@@ -5,7 +5,7 @@ import {
   FaEnvelope, FaLock, FaStethoscope, FaPills, FaHeartbeat, FaBandAid
 } from 'react-icons/fa';
 import axios from 'axios';
-import ErrorToast from '../components/ErrorToast';
+import ErrorToast from '../../components/ErrorToast';
 
 // --- Floating Background Component ---
 const FloatingBackground = () => {
@@ -90,13 +90,11 @@ const Login = () => {
       if (response.status === 200) {
         const { full_name, role, token, specialization } = response.data;
         
-        // Success: Save real user data
         localStorage.setItem('userName', full_name);
         localStorage.setItem('userRole', role);
         localStorage.setItem('token', token);
         if (specialization) localStorage.setItem('specialization', specialization);
         
-        // Redirect to specific role dashboards
         navigate(`/${role}/dashboard`);
       }
     } catch (error) {

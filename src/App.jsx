@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from "react";
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
-import DoctorDashboard from "./pages/DoctorDashboard";
-import PatientsDashboard from "./pages/PatientsDashboard";
+import DoctorDashboard from "./pages/doctor/DoctorDashboard";
+import PatientDashboard from "./pages/patient/PatientDashboard";
 import LandingPage from "./pages/LandingPage";
-import Login from "./pages/Login";
-import Register from "./pages/Register";
-import AdminDashboard from "./pages/AdminDashboard";
+import Login from "./pages/auth/Login";
+import Register from "./pages/auth/Register";
+import AdminDashboard from "./pages/admin/AdminDashboard";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { Toaster } from 'react-hot-toast';
 import { motion, AnimatePresence } from "framer-motion";
@@ -42,7 +42,6 @@ function App() {
   const [showSplash, setShowSplash] = useState(false);
 
   useEffect(() => {
-    // Show splash only if it's the root route and hasn't shown yet in this session
     const isRoot = window.location.pathname === "/";
     const hasShown = sessionStorage.getItem("splashShown");
     
@@ -68,8 +67,8 @@ function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
           <Route path="/doctor/dashboard" element={<DoctorDashboard />} />
-          <Route path="/patient/dashboard" element={<PatientsDashboard initialTab="dashboard" />} />
-          <Route path="/patient/book-token" element={<PatientsDashboard initialTab="book" />} />
+          <Route path="/patient/dashboard" element={<PatientDashboard initialTab="dashboard" />} />
+          <Route path="/patient/book-token" element={<PatientDashboard initialTab="book" />} />
           <Route path="/admin/dashboard" element={<AdminDashboard />} />
         </Routes>
       </ErrorBoundary>

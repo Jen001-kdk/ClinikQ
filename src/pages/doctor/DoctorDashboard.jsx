@@ -41,15 +41,15 @@ import {
 } from "lucide-react";
 
 // Dashboard Components
-import StatCards from "../components/dashboard/StatCards";
-import PatientFlowChart from "../components/dashboard/PatientFlowChart";
-import LiveQueue from "../components/dashboard/LiveQueue";
-import ActivityLog from "../components/dashboard/ActivityLog";
-import AppointmentCalendar from "../components/dashboard/AppointmentCalendar";
-import AppointmentList from "../components/dashboard/AppointmentList";
-import QuickActions from "../components/dashboard/QuickActions";
-import DashboardSkeleton from "../components/dashboard/DashboardSkeleton";
-import AppointmentDetailModal from "../components/dashboard/AppointmentDetailModal";
+import StatCards from "../../components/dashboard/StatCards";
+import PatientFlowChart from "../../components/dashboard/PatientFlowChart";
+import LiveQueue from "../../components/dashboard/LiveQueue";
+import ActivityLog from "../../components/dashboard/ActivityLog";
+import AppointmentCalendar from "../../components/dashboard/AppointmentCalendar";
+import AppointmentList from "../../components/dashboard/AppointmentList";
+import QuickActions from "../../components/dashboard/QuickActions";
+import DashboardSkeleton from "../../components/dashboard/DashboardSkeleton";
+import AppointmentDetailModal from "../../components/dashboard/AppointmentDetailModal";
 
 // --- Mock Data & Consts ---
 
