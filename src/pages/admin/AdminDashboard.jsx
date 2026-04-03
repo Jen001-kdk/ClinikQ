@@ -1608,7 +1608,13 @@ const AdminDashboard = () => {
 
         {/* Anchored Admin Profile */}
         <div className="mt-auto p-6 border-t border-[#1E293B] bg-[#0A0F1F]">
-          <div className="flex items-center gap-3 p-3 rounded-[20px] hover:bg-slate-800 transition-all duration-[400ms] ease-in-out cursor-pointer group">
+          <div 
+            onClick={() => {
+              localStorage.clear();
+              window.location.href = '/login';
+            }}
+            className="flex items-center gap-3 p-3 rounded-[20px] hover:bg-slate-800 transition-all duration-[400ms] ease-in-out cursor-pointer group"
+          >
             <div className="w-12 h-12 rounded-[16px] bg-indigo-500 flex items-center justify-center text-white font-bold shadow-lg shadow-indigo-500/20 group-hover:scale-105 transition-transform duration-[400ms]">
               {(localStorage.getItem('userName') || 'AD').match(/\b(\w)/g)?.slice(0,2).join('') || 'AD'}
             </div>

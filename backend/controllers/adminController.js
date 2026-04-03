@@ -53,14 +53,14 @@ const getQueue = async (req, res) => {
     const queryDate = date || today;
 
     const tokens = await Token.find({ date: queryDate })
-      .populate('patientId', 'name patientId email')
-      .populate('doctorId', 'name specialization')
+      .populate('patientId', 'name full_name patientId email')
+      .populate('doctorId', 'name full_name specialization')
       .sort({ createdAt: -1 });
 
     const stats = {
       total: tokens.length,
       waiting: tokens.filter(t => t.status === 'Waiting' || t.status === 'pending').length,
-      inProgress: tokens.filter(t => t.status === 'Now Serving').length,
+      inProgress: tokens.filter(t => t.status === 'in-progress').length,
       completed: tokens.filter(t => t.status === 'Completed').length,
       cancelled: tokens.filter(t => t.status === 'Cancelled').length,
     };
@@ -99,7 +99,7 @@ const generateToken = (io) => async (req, res) => {
     if (!patient || !doctor) return res.status(404).json({ error: 'Patient or Doctor not found' });
 
     const today = new Date().toLocaleDateString('en-GB');
-    const count = await Token.countDocuments({ doctorId: doctor._id, date: today, status: { $in: ['Waiting', 'Now Serving', 'pending'] } });
+    const count = await Token.countDocuments({ doctorId: doctor._id, date: today, status: { $in: ['Waiting', 'in-progress', 'pending'] } });
     const position = count + 1;
     const avgTime = doctor.avgConsultTime || 15;
     const estimatedMinutes = position * avgTime;

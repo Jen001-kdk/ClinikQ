@@ -8,7 +8,7 @@ const tokenSchema = new mongoose.Schema({
   tokenId: String,
   department: String,
   doctor: String,
-  status: { type: String, enum: ['Waiting', 'Now Serving', 'Completed', 'Cancelled', 'pending'], default: 'pending' },
+  status: { type: String, enum: ['Waiting', 'in-progress', 'Completed', 'Cancelled', 'pending', 'no-show'], default: 'pending' },
   position: Number,
   estimatedWait: String,
   bookedTime: String,

@@ -23,23 +23,27 @@ const AppointmentList = ({ queue }) => {
              <p className="text-[9px] font-black uppercase tracking-widest">No upcoming tokens</p>
           </div>
         ) : (
-          queue.map((apt, i) => (
-            <div key={apt._id} className="flex gap-4 items-center group cursor-pointer p-2 rounded-xl hover:bg-slate-50 transition-smooth">
-              <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shadow-sm shrink-0 uppercase font-black text-[10px]">
-                {apt.userName.substring(0, 2)}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-[11px] font-black text-slate-900 uppercase tracking-wide truncate">{apt.userName}</p>
-                <div className="flex items-center gap-2 mt-0.5">
-                  <Clock size={10} className="text-slate-400" />
-                  <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{apt.bookedTime || '--:--'}</p>
+            queue.map((apt, i) => {
+              const displayName = apt.patientId?.full_name || apt.patientId?.name || (apt.userName === apt.doctor ? "Patient" : apt.userName) || "Patient";
+              const initials = displayName.substring(0, 2).toUpperCase();
+              return (
+                <div key={apt._id} className="flex gap-4 items-center group cursor-pointer p-2 rounded-xl hover:bg-slate-50 transition-smooth">
+                  <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shadow-sm shrink-0 uppercase font-black text-[10px]">
+                    {initials}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[11px] font-black text-slate-900 uppercase tracking-wide truncate">{displayName}</p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <Clock size={10} className="text-slate-400" />
+                      <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{apt.bookedTime || '--:--'}</p>
+                    </div>
+                  </div>
+                  <div className={`px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-tighter bg-slate-100 text-slate-500`}>
+                    {apt.status === 'in-progress' ? 'In Progress' : apt.status}
+                  </div>
                 </div>
-              </div>
-              <div className={`px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-tighter bg-slate-100 text-slate-500`}>
-                {apt.status}
-              </div>
-            </div>
-          ))
+              );
+            })
         )}
       </div>
       

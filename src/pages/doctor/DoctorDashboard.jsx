@@ -37,7 +37,18 @@ import {
   Circle,
   UserPlus,
   UploadCloud,
-  Shield
+  Shield,
+  ArrowLeft,
+  MessageSquare,
+  Activity,
+  Thermometer,
+  Droplets,
+  Pill,
+  FileSpreadsheet,
+  Eye,
+  FilePlus,
+  Folder,
+  Trash2
 } from "lucide-react";
 
 // Dashboard Components
@@ -95,18 +106,27 @@ const DoctorDashboard = () => {
   const [currentTime, setCurrentTime] = useState(new Date());
 
   const [isLoading, setIsLoading] = useState(true);
-  const [doctorInfo, setDoctorInfo] = useState({
-    name: "Doctor",
-    specialization: "Specialist",
-    initials: "DR",
-    workingDays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'],
-    startTime: "09:00",
-    endTime: "17:00",
-    maxPatients: 30,
-    avgConsultTime: 15,
-    specialization: "",
-    license: "",
-    degree: ""
+  const [doctorInfo, setDoctorInfo] = useState(() => {
+    const saved = localStorage.getItem('clinikq_doctor_data');
+    if (saved && saved !== "undefined") {
+      try {
+        return JSON.parse(saved);
+      } catch (err) {
+        console.error("Invalid doctor data in storage:", err);
+      }
+    }
+    return {
+      name: "Doctor",
+      specialization: "Specialist",
+      initials: "DR",
+      workingDays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'],
+      startTime: "09:00",
+      endTime: "17:00",
+      maxPatients: 30,
+      avgConsultTime: 15,
+      license: "",
+      degree: ""
+    };
   });
   const [saveStatus, setSaveStatus] = useState({ show: false, message: "", type: "" });
 
@@ -121,6 +141,10 @@ const DoctorDashboard = () => {
     pendingReports: 0,
     completedReports: 0
   });
+
+  const [openMenuId, setOpenMenuId] = useState(null);
+  const [selectedPatient, setSelectedPatient] = useState(null);
+  const [removedPatientIds, setRemovedPatientIds] = useState([]);
 
   // Modal State
   const [isCalendarModalOpen, setIsCalendarModalOpen] = useState(false);
@@ -139,7 +163,12 @@ const DoctorDashboard = () => {
         axios.get('/api/patient/reports?userName=Patient', { headers }) // Mock for reports
       ]);
 
-      setDoctorInfo(profileRes.data);
+      const userProfile = profileRes.data;
+      setDoctorInfo(prev => ({ 
+        ...prev, 
+        ...userProfile,
+        name: prev.name || userProfile.name // Preserve identity
+      }));
       setStats({
         totalPatients: patientsRes.data.length,
         appointments: summaryRes.data.stats.patientsWaiting,
@@ -151,11 +180,11 @@ const DoctorDashboard = () => {
 
       // Fetch today's queue
       const today = new Date().toLocaleDateString('en-GB');
-      const queueRes = await axios.get(`/api/appointments?doctorId=${profileRes.data._id}&date=${today}`, { headers });
+      const queueRes = await axios.get(`/api/appointments?doctorId=${userProfile._id}&date=${today}`, { headers });
       setQueue(queueRes.data);
 
       // Fetch ALL appointments for this doctor (for calendar dot indicators)
-      const allApptRes = await axios.get(`/api/appointments?doctorId=${profileRes.data._id}`, { headers });
+      const allApptRes = await axios.get(`/api/appointments?doctorId=${userProfile._id}`, { headers });
       setAllAppointments(allApptRes.data);
 
       setIsLoading(false);
@@ -189,9 +218,14 @@ const DoctorDashboard = () => {
     });
 
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+
+    const handleClickOutside = () => setOpenMenuId(null);
+    window.addEventListener('click', handleClickOutside);
+
     return () => {
       socket.disconnect();
       clearInterval(timer);
+      window.removeEventListener('click', handleClickOutside);
     };
   }, []);
 
@@ -202,12 +236,32 @@ const DoctorDashboard = () => {
         headers: { Authorization: `Bearer ${token}` }
       });
       
-      if (!res.data.nextPatient) {
+      const nextPatient = res.data.currentPatient;
+
+      if (!nextPatient) {
         setSaveStatus({ show: true, message: "No more patients are waiting in the queue.", type: "info" });
         setTimeout(() => setSaveStatus(prev => ({ ...prev, show: false })), 3000);
+        
+        // Clear logic for serving box: ensure all in-progress are marked done
+        setQueue(prev => prev.map(q => 
+          q.status === 'in-progress' ? { ...q, status: 'Completed' } : q
+        ));
+      } else {
+        // Targeted mapping fix: ensure patient full_name is correctly handled
+        setQueue(prevQueue => {
+          const updated = prevQueue.map(q => 
+            q.status === 'in-progress' ? { ...q, status: 'Completed' } : q
+          );
+          
+          const idx = updated.findIndex(q => q._id === nextPatient._id);
+          if (idx !== -1) {
+            updated[idx] = nextPatient;
+          } else {
+            updated.push(nextPatient);
+          }
+          return updated;
+        });
       }
-      
-      // Socket will trigger refresh
     } catch (err) {
       console.error("Queue error:", err);
       setSaveStatus({ show: true, message: "Error updating queue.", type: "error" });
@@ -218,11 +272,37 @@ const DoctorDashboard = () => {
   const handleMarkDone = async () => {
     try {
       const token = localStorage.getItem('token');
-      await axios.post('/api/queue/done', {}, {
+      const res = await axios.post('/api/queue/done', {}, {
         headers: { Authorization: `Bearer ${token}` }
       });
+
+      // UI LOCK: Only update the status field to 'Completed' in local state.
+      // Keep existing patientId and full_name exactly as they were.
+      setQueue(prevQueue => prevQueue.map(q => 
+        q.status === 'in-progress' ? { ...q, status: 'Completed' } : q
+      ));
+
     } catch (err) {
       console.error("Queue error:", err);
+      setSaveStatus({ show: true, message: "Error updating queue.", type: "error" });
+      setTimeout(() => setSaveStatus(prev => ({ ...prev, show: false })), 3000);
+    }
+  };
+
+  const handleNoShow = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      await axios.post('/api/queue/no-show', {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      // Refresh data to reflect the no-show status across all lists
+      fetchDoctorData();
+
+    } catch (err) {
+      console.error("No-Show error:", err);
+      setSaveStatus({ show: true, message: "Error marking no-show.", type: "error" });
+      setTimeout(() => setSaveStatus(prev => ({ ...prev, show: false })), 3000);
     }
   };
 
@@ -251,7 +331,7 @@ const DoctorDashboard = () => {
     setIsCalendarModalOpen(true);
   };
 
-  const servingPatient = queue.find(q => q.status === 'Now Serving');
+  const servingPatient = queue.find(q => q.status === 'in-progress');
 
   const pageTransition = {
     initial: { opacity: 0, y: 10 },
@@ -302,7 +382,7 @@ const DoctorDashboard = () => {
           </div>
           <button 
             onClick={() => {
-              localStorage.removeItem('token');
+              localStorage.clear();
               navigate('/login');
             }}
             className="w-full flex items-center gap-2 px-3 py-2 text-rose-400 hover:text-white hover:bg-rose-500/20 rounded-xl transition-smooth font-bold text-[10px] uppercase tracking-wider"
@@ -479,9 +559,11 @@ const DoctorDashboard = () => {
                         onChange={(e) => setStatusFilter(e.target.value)}
                         className="w-full bg-white border border-slate-100 rounded-2xl px-6 py-4 text-xs font-bold text-slate-900 appearance-none focus:outline-none focus:ring-4 focus:ring-blue-500/5 focus:border-[#007AFF] transition-all cursor-pointer"
                       >
-                        <option>All Statuses</option>
-                        <option>Completed</option>
-                        <option>Pending</option>
+                        <option value="All Statuses">All Statuses</option>
+                        <option value="Completed">Completed</option>
+                        <option value="pending">Pending</option>
+                        <option value="no-show">No-Show</option>
+                        <option value="Cancelled">Cancelled</option>
                       </select>
                       <ChevronDown className="absolute right-5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
                     </div>
@@ -501,38 +583,105 @@ const DoctorDashboard = () => {
                         </tr>
                       </thead>
                       <tbody>
-                        {patients.filter(p => {
-                          const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                                               p.contact.includes(searchQuery) ||
-                                               p.id.toLowerCase().includes(searchQuery.toLowerCase());
-                          const matchesStatus = statusFilter === "All Statuses" || p.status === statusFilter;
+                        {allAppointments.filter(apt => !removedPatientIds.includes(apt._id)).filter(apt => {
+                          const pName = apt.patientId?.full_name || apt.patientId?.name || apt.userName || "Patient";
+                          const pContact = apt.patientId?.contact || "";
+                          const pId = apt.patientId?.patientId || apt.tokenId || "";
+
+                          const matchesSearch = pName.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                                               pContact.includes(searchQuery) ||
+                                               pId.toLowerCase().includes(searchQuery.toLowerCase());
+                          const matchesStatus = statusFilter === "All Statuses" || apt.status === statusFilter;
                           return matchesSearch && matchesStatus;
-                        }).map((p, idx) => (
-                          <tr key={p.id} className="hover:bg-slate-50/50 transition-colors group cursor-pointer border-b border-slate-50 last:border-0 font-sans">
+                        }).map((apt, idx) => (
+                          <tr key={apt._id} className="hover:bg-slate-50/50 transition-colors group cursor-pointer border-b border-slate-50 last:border-0 font-sans">
                             <td className="px-8 py-5">
                               <div className="flex items-center gap-4">
-                                <div className="w-10 h-10 bg-slate-900 rounded-[14px] flex items-center justify-center font-black text-[11px] text-white group-hover:scale-110 transition-transform shadow-lg">{p.name.substring(0, 2).toUpperCase()}</div>
+                                <div className="w-10 h-10 bg-slate-900 rounded-[14px] flex items-center justify-center font-black text-[11px] text-white group-hover:scale-110 transition-transform shadow-lg">
+                                  {(apt.patientId?.full_name || apt.patientId?.name || apt.userName || "P").substring(0, 2).toUpperCase()}
+                                </div>
                                 <div>
-                                  <p className="text-sm font-black text-slate-900 leading-tight">{p.name}</p>
-                                  <p className="text-[10px] font-bold text-slate-400 mt-0.5">{p.id}</p>
+                                  <p className="text-sm font-black text-slate-900 leading-tight">{apt.patientId?.full_name || apt.patientId?.name || apt.userName || "Patient"}</p>
+                                  <p className="text-[10px] font-bold text-slate-400 mt-0.5">{apt.patientId?.patientId || apt.tokenId}</p>
                                 </div>
                               </div>
                             </td>
-                            <td className="px-8 py-5 text-sm font-bold text-slate-600">{p.age} / {p.gender}</td>
-                            <td className="px-8 py-5 text-sm font-bold text-slate-600 tracking-tight">{p.contact}</td>
-                            <td className="px-8 py-5 text-sm font-black text-slate-900">{p.lastVisit}</td>
+                            <td className="px-8 py-5 text-sm font-bold text-slate-600">{apt.patientId?.age || "--"} / {apt.patientId?.gender || "--"}</td>
+                            <td className="px-8 py-5 text-sm font-bold text-slate-600 tracking-tight">{apt.patientId?.contact || "--"}</td>
+                            <td className="px-8 py-5 text-sm font-black text-slate-900">{apt.date}</td>
                             <td className="px-8 py-5 text-center">
                               <span className={`px-4 py-1.5 rounded-full text-[9px] font-black tracking-widest uppercase inline-flex items-center gap-2 ${
-                                p.status === 'Completed' ? 'bg-teal-50 text-teal-600' : 'bg-orange-50 text-orange-600'
+                                apt.status === 'Completed' ? 'bg-teal-50 text-teal-600' : 
+                                apt.status === 'no-show' ? 'bg-amber-50 text-amber-600' :
+                                apt.status === 'Cancelled' ? 'bg-rose-50 text-rose-600' : 'bg-orange-50 text-orange-600'
                               }`}>
-                                <div className={`w-1 h-1 rounded-full ${p.status === 'Completed' ? 'bg-teal-600' : 'bg-orange-600'}`} />
-                                {p.status}
+                                <div className={`w-1 h-1 rounded-full ${
+                                  apt.status === 'Completed' ? 'bg-teal-600' : 
+                                  apt.status === 'no-show' ? 'bg-amber-600' :
+                                  apt.status === 'Cancelled' ? 'bg-rose-600' : 'bg-orange-600'
+                                }`} />
+                                {apt.status}
                               </span>
                             </td>
-                            <td className="px-8 py-5 text-right">
-                              <button className="w-8 h-8 rounded-xl bg-slate-50 text-slate-400 hover:text-slate-900 transition-all flex items-center justify-center ml-auto">
-                                <MoreVertical size={14} />
+                            <td className="px-8 py-5 text-right relative">
+                              <button 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setOpenMenuId(openMenuId === apt._id ? null : apt._id);
+                                }}
+                                className={`w-8 h-8 rounded-xl transition-all flex items-center justify-center ml-auto ${
+                                  openMenuId === apt._id ? 'bg-slate-900 text-white shadow-lg' : 'bg-slate-50 text-slate-400 hover:text-slate-900 hover:bg-slate-100'
+                                }`}
+                              >
+                                {openMenuId === apt._id ? <X size={14} /> : <MoreVertical size={14} />}
                               </button>
+
+                              <AnimatePresence>
+                                {openMenuId === apt._id && (
+                                  <motion.div
+                                    initial={{ opacity: 0, scale: 0.95, y: 10, x: 10 }}
+                                    animate={{ opacity: 1, scale: 1, y: 0, x: 0 }}
+                                    exit={{ opacity: 0, scale: 0.95, y: 10, x: 10 }}
+                                    className="absolute right-8 top-16 w-56 bg-white rounded-2xl shadow-2xl border border-slate-100 z-[100] py-2 overflow-hidden"
+                                  >
+                                    <button 
+                                      onClick={() => {
+                                        setSelectedPatient(apt);
+                                        setView('patient-details');
+                                        setOpenMenuId(null);
+                                      }}
+                                      className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50 text-slate-600 hover:text-[#007AFF] transition-colors text-[11px] font-black uppercase tracking-wider text-left"
+                                    >
+                                      <Eye size={14} /> View Details
+                                    </button>
+                                    <button 
+                                      onClick={() => setOpenMenuId(null)}
+                                      className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50 text-slate-600 hover:text-[#007AFF] transition-colors text-[11px] font-black uppercase tracking-wider text-left"
+                                    >
+                                      <FilePlus size={14} /> Add Report
+                                    </button>
+                                    <button 
+                                      onClick={() => {
+                                        setView('reports');
+                                        setOpenMenuId(null);
+                                      }}
+                                      className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50 text-slate-600 hover:text-[#007AFF] transition-colors text-[11px] font-black uppercase tracking-wider text-left"
+                                    >
+                                      <Folder size={14} /> View Reports
+                                    </button>
+                                    <div className="h-px bg-slate-50 my-1" />
+                                    <button 
+                                      onClick={() => {
+                                        setRemovedPatientIds(prev => [...prev, apt._id]);
+                                        setOpenMenuId(null);
+                                      }}
+                                      className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-rose-50 text-rose-500 transition-colors text-[11px] font-black uppercase tracking-wider text-left"
+                                    >
+                                      <Trash2 size={14} /> Remove Patient
+                                    </button>
+                                  </motion.div>
+                                )}
+                              </AnimatePresence>
                             </td>
                           </tr>
                         ))}
@@ -632,9 +781,9 @@ const DoctorDashboard = () => {
                       
                       {/* Integrated Serving Card */}
                       <div className="bg-gradient-to-br from-[#0ea5e9] to-[#0284c7] rounded-[32px] p-8 text-white text-center shadow-2xl shadow-blue-500/10 relative overflow-hidden h-[320px] flex flex-col justify-center">
-                        <p className="text-[10px] font-black uppercase tracking-[0.3em] opacity-70 mb-2">Now Serving</p>
+                        <p className="text-[10px] font-black uppercase tracking-[0.3em] opacity-70 mb-2">In Progress</p>
                         <h3 className="text-[100px] font-black mb-2 tracking-tighter leading-none">#{servingPatient?.tokenId || '--'}</h3>
-                        <p className="text-xl font-bold mb-6">{servingPatient?.userName || 'No patient'}</p>
+                        <p className="text-xl font-bold mb-6">{servingPatient ? (servingPatient.patientId?.full_name || servingPatient.patientId?.name || (servingPatient.userName === servingPatient.doctor ? "Patient" : servingPatient.userName)) : "--"}</p>
                         <div className="flex justify-center">
                           <span className="px-6 py-2 bg-black/10 backdrop-blur-md rounded-full text-[10px] font-black uppercase tracking-widest border border-white/10">{servingPatient ? 'In Progress' : 'Idle'}</span>
                         </div>
@@ -661,24 +810,37 @@ const DoctorDashboard = () => {
                       </div>
 
                       {/* Primary Actions */}
-                      <div className="grid grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 gap-4">
+                        <div className="grid grid-cols-2 gap-4">
+                          <motion.button 
+                            whileHover={{ scale: 1.02, y: -2 }}
+                            whileTap={{ scale: 0.98 }}
+                            onClick={handleCallNext}
+                            className="bg-[#0ea5e9] text-white py-5 rounded-24 flex items-center justify-center gap-3 shadow-lg shadow-blue-500/20 group"
+                          >
+                            <SkipForward size={20} strokeWidth={3} className="group-hover:translate-x-1 transition-transform" />
+                            <span className="text-sm font-black tracking-tight">Call Next</span>
+                          </motion.button>
+                          <motion.button 
+                            whileHover={{ scale: 1.02, y: -2 }}
+                            whileTap={{ scale: 0.98 }}
+                            onClick={handleMarkDone}
+                            className="bg-[#10b981] text-white py-5 rounded-24 flex items-center justify-center gap-3 shadow-lg shadow-emerald-500/20"
+                          >
+                            <CheckCircle2 size={20} strokeWidth={3} />
+                            <span className="text-sm font-black tracking-tight">Mark Done</span>
+                          </motion.button>
+                        </div>
+                        
+                        {/* No-Show Button: Strictly placed below Call Next/Done grid */}
                         <motion.button 
                           whileHover={{ scale: 1.02, y: -2 }}
                           whileTap={{ scale: 0.98 }}
-                          onClick={handleCallNext}
-                          className="bg-[#0ea5e9] text-white py-5 rounded-24 flex items-center justify-center gap-3 shadow-lg shadow-blue-500/20 group"
+                          onClick={handleNoShow}
+                          className="w-full bg-white border-2 border-amber-500 text-amber-600 py-5 rounded-24 flex items-center justify-center gap-3 shadow-lg shadow-amber-500/10"
                         >
-                          <SkipForward size={20} strokeWidth={3} className="group-hover:translate-x-1 transition-transform" />
-                          <span className="text-sm font-black tracking-tight">Call Next</span>
-                        </motion.button>
-                        <motion.button 
-                          whileHover={{ scale: 1.02, y: -2 }}
-                          whileTap={{ scale: 0.98 }}
-                          onClick={handleMarkDone}
-                          className="bg-[#10b981] text-white py-5 rounded-24 flex items-center justify-center gap-3 shadow-lg shadow-emerald-500/20"
-                        >
-                          <CheckCircle2 size={20} strokeWidth={3} />
-                          <span className="text-sm font-black tracking-tight">Mark Done</span>
+                          <AlertCircle size={20} strokeWidth={3} />
+                          <span className="text-sm font-black tracking-tight">No-Show</span>
                         </motion.button>
                       </div>
                     </div>
@@ -690,20 +852,27 @@ const DoctorDashboard = () => {
                         <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest opacity-60">{queue.filter(q => q.status === 'Waiting').length} waiting</span>
                       </div>
                       <div className="space-y-4">
-                        {queue.map((q, i) => (
-                          <div key={q._id} className={`flex items-center gap-5 p-4 rounded-24 transition-all border border-transparent ${q.status === 'Now Serving' ? 'bg-amber-50/50 border-amber-100/30' : 'hover:bg-slate-50'}`}>
-                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-xs font-black ${q.status === 'Now Serving' ? 'bg-amber-100 text-amber-700' : 'bg-slate-50 text-slate-400'}`}>
-                              {q.tokenId}
+                        {queue.map((q, i) => {
+                          const isInProgress = q.status === 'in-progress';
+                          const isNoShow = q.status === 'no-show';
+                          return (
+                            <div key={q._id} className={`flex items-center gap-5 p-4 rounded-24 transition-all border border-transparent ${isInProgress ? 'bg-amber-50/50 border-amber-100/30' : 'hover:bg-slate-50'}`}>
+                              <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-xs font-black ${isInProgress ? 'bg-amber-100 text-amber-700' : 'bg-slate-50 text-slate-400'}`}>
+                                {q.tokenId}
+                              </div>
+                              <div className="flex-1">
+                                <p className="text-sm font-black text-slate-900 leading-none mb-1">{q.patientId?.full_name || q.patientId?.name || (q.userName === q.doctor ? "Patient" : q.userName) || "Patient"}</p>
+                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest opacity-60">Wait: {q.estimatedWait}</p>
+                              </div>
+                              <span className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest ${
+                                isInProgress ? 'bg-amber-100 text-amber-600' : 
+                                isNoShow ? 'bg-orange-50 text-orange-600' : 'bg-slate-100 text-slate-400'
+                              }`}>
+                                {q.status}
+                              </span>
                             </div>
-                            <div className="flex-1">
-                              <p className="text-sm font-black text-slate-900 leading-none mb-1">{q.userName}</p>
-                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest opacity-60">Wait: {q.estimatedWait}</p>
-                            </div>
-                            <span className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest ${q.status === 'Now Serving' ? 'bg-amber-100 text-amber-600' : 'bg-slate-100 text-slate-400'}`}>
-                              {q.status}
-                            </span>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
 
@@ -716,6 +885,7 @@ const DoctorDashboard = () => {
                       <div className="space-y-2 max-h-[600px] overflow-y-auto pr-2 no-scrollbar">
                         {queue.map((s, i) => {
                           const isCompleted = s.status === 'Completed';
+                          const isNoShow = s.status === 'no-show';
                           const isPending = s.status === 'pending' || s.status === 'Waiting';
                           
                           return (
@@ -723,16 +893,24 @@ const DoctorDashboard = () => {
                                <span className="text-[11px] font-black text-blue-500 w-8">{s.tokenId}</span>
                                <div className="flex-1">
                                  <p className="text-sm font-black text-slate-900 group-hover:translate-x-1 transition-transform">
-                                   {s.patientId?.name || s.userName}
+                                   {s.patientId?.full_name || s.patientId?.name || (s.userName === s.doctor ? "Patient" : s.userName) || "Patient"}
                                  </p>
                                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5 opacity-60">
                                    {s.bookedTime}
                                  </p>
                                </div>
                                <div className="flex items-center gap-2">
-                                 <div className={`w-2 h-2 rounded-full ${isCompleted ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : isPending ? 'bg-orange-500 shadow-[0_0_8px_rgba(249,115,22,0.5)]' : 'bg-slate-300'}`} />
-                                 <span className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest ${isCompleted ? 'text-emerald-500 bg-emerald-50/50' : isPending ? 'text-orange-500 bg-orange-50/50' : 'text-slate-400 bg-slate-50'}`}>
-                                   {s.status === 'pending' ? 'pending' : s.status}
+                                 <div className={`w-2 h-2 rounded-full ${
+                                   isCompleted ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 
+                                   isNoShow ? 'bg-orange-500 shadow-[0_0_8px_rgba(249,115,22,0.5)]' :
+                                   isPending ? 'bg-orange-500 shadow-[0_0_8px_rgba(249,115,22,0.5)]' : 'bg-slate-300'
+                                 }`} />
+                                 <span className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest ${
+                                   isCompleted ? 'text-emerald-500 bg-emerald-50/50' : 
+                                   isNoShow ? 'text-orange-600 bg-orange-50' :
+                                   isPending ? 'text-orange-500 bg-orange-50/50' : 'text-slate-400 bg-slate-50'
+                                 }`}>
+                                   {s.status}
                                  </span>
                                </div>
                             </div>
@@ -748,7 +926,200 @@ const DoctorDashboard = () => {
               </motion.div>
             )}
 
-            {/* VIEW: PROFILE */}
+            {/* VIEW: PATIENT DETAILS (MEDICAL SUMMARY) */}
+            {view === 'patient-details' && selectedPatient && (
+              <motion.div key="patient-details" {...pageTransition} className="h-full overflow-y-auto p-10 custom-scrollbar">
+                <div className="max-w-7xl mx-auto">
+                  
+                  {/* Breadcrumbs & Back Button */}
+                  <div className="flex items-center gap-4 mb-8">
+                    <button 
+                      onClick={() => setView('patients')}
+                      className="w-10 h-10 rounded-xl bg-white border border-slate-100 flex items-center justify-center text-slate-400 hover:text-[#007AFF] hover:border-[#007AFF] transition-all shadow-sm active:scale-95"
+                    >
+                      <ArrowLeft size={18} />
+                    </button>
+                    <div>
+                      <div className="flex items-center gap-2 text-[10px] font-black tracking-widest text-slate-400 uppercase">
+                        <span className="cursor-pointer hover:text-blue-500" onClick={() => setView('patients')}>Patients</span>
+                        <ChevronRight size={10} />
+                        <span className="text-slate-900">Details</span>
+                      </div>
+                      <h2 className="text-2xl font-black text-slate-900 tracking-tight mt-1">Medical Profile</h2>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-12 gap-8">
+                    
+                    {/* Left: Patient Card (4/12) */}
+                    <div className="col-span-4 space-y-6">
+                      <div className="bg-white rounded-[32px] p-8 border border-slate-100 shadow-soft relative overflow-hidden">
+                        <div className="relative z-10 flex flex-col items-center text-center">
+                          <div className="w-24 h-24 bg-gradient-to-br from-[#007AFF] to-blue-600 rounded-[32px] flex items-center justify-center text-white text-3xl font-black shadow-xl uppercase mb-6">
+                            {(selectedPatient.patientId?.full_name || selectedPatient.patientId?.name || selectedPatient.userName || "P").substring(0, 2).toUpperCase()}
+                          </div>
+                          
+                          <div className="mb-6">
+                            <h3 className="text-2xl font-black text-slate-900 mb-1">{selectedPatient.patientId?.full_name || selectedPatient.patientId?.name || selectedPatient.userName}</h3>
+                            <span className="px-4 py-1 bg-emerald-50 text-emerald-600 rounded-full text-[10px] font-black uppercase tracking-widest border border-emerald-100">
+                              Active Patient
+                            </span>
+                          </div>
+
+                          <div className="w-full space-y-4 pt-6 border-t border-slate-50">
+                            <div className="flex justify-between items-center">
+                              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Patient ID</span>
+                              <span className="text-sm font-black text-slate-900">{selectedPatient.patientId?.patientId || selectedPatient.tokenId || 'PAT-8812'}</span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Gender / Age</span>
+                              <span className="text-sm font-black text-slate-900">{selectedPatient.patientId?.gender || 'Male'} / {selectedPatient.patientId?.age || '28'}</span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Joined Date</span>
+                              <span className="text-sm font-black text-slate-900">{selectedPatient.date || 'April 3, 2026'}</span>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-3 w-full mt-8">
+                            <button className="flex items-center justify-center gap-2 py-3.5 bg-[#007AFF] text-white rounded-2xl text-[11px] font-black uppercase tracking-widest shadow-lg shadow-blue-500/20 active:scale-95 transition-all">
+                              <MessageSquare size={14} /> Send Message
+                            </button>
+                            <button className="flex items-center justify-center gap-2 py-3.5 bg-slate-100 text-slate-600 rounded-2xl text-[11px] font-black uppercase tracking-widest hover:bg-slate-200 active:scale-95 transition-all">
+                              <Download size={14} /> PDF Report
+                            </button>
+                          </div>
+                        </div>
+                        
+                        <div className="absolute top-0 right-0 w-32 h-32 bg-blue-50 rounded-full blur-3xl -mr-16 -mt-16 opacity-50" />
+                      </div>
+
+                      {/* Quick Contact Info */}
+                      <div className="bg-white rounded-[32px] p-6 border border-slate-100 shadow-soft space-y-4">
+                        <div className="flex items-center gap-4 p-3 bg-slate-50 rounded-2xl">
+                          <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-blue-500 shadow-sm"><Mail size={16} /></div>
+                          <div>
+                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Primary Email</p>
+                            <p className="text-[12px] font-bold text-slate-900 leading-none">{selectedPatient.patientId?.email || 'patient@clinikq.com'}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-4 p-3 bg-slate-50 rounded-2xl">
+                          <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-teal-500 shadow-sm"><MapPin size={16} /></div>
+                          <div>
+                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Location</p>
+                            <p className="text-[12px] font-bold text-slate-900 leading-none">{selectedPatient.patientId?.address || 'Kathmandu, Nepal'}</p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Right: Medical Summary (8/12) */}
+                    <div className="col-span-8 space-y-8">
+                      
+                      {/* Section Title */}
+                      <div className="flex items-center justify-between">
+                        <h4 className="flex items-center gap-2 text-[#1A1F37] font-black">
+                           <Activity size={20} className="text-[#007AFF]" />
+                           <span className="text-xl uppercase tracking-widest">Medical Summary</span>
+                        </h4>
+                        <span className="text-[10px] font-black text-emerald-500 uppercase tracking-widest px-3 py-1 bg-emerald-50 rounded-lg border border-emerald-100">Live Health Data</span>
+                      </div>
+
+                      {/* Vital Stats Grid */}
+                      <div className="grid grid-cols-4 gap-6">
+                        <div className="bg-white rounded-24 p-6 border border-slate-100 shadow-soft">
+                          <div className="w-12 h-12 bg-rose-50 text-rose-500 rounded-xl flex items-center justify-center mb-4 transition-transform hover:scale-110"><Activity size={24} /></div>
+                          <p className="text-2xl font-black text-slate-900 leading-none mb-1">72 <span className="text-sm font-bold text-slate-400">bpm</span></p>
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Heart Rate</p>
+                        </div>
+                        <div className="bg-white rounded-24 p-6 border border-slate-100 shadow-soft">
+                          <div className="w-12 h-12 bg-blue-50 text-blue-500 rounded-xl flex items-center justify-center mb-4 transition-transform hover:scale-110"><TrendingUp size={24} /></div>
+                          <p className="text-2xl font-black text-slate-900 leading-none mb-1">120/80 <span className="text-sm font-bold text-slate-400">mmHg</span></p>
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Blood Pressure</p>
+                        </div>
+                        <div className="bg-white rounded-24 p-6 border border-slate-100 shadow-soft">
+                          <div className="w-12 h-12 bg-amber-50 text-amber-500 rounded-xl flex items-center justify-center mb-4 transition-transform hover:scale-110"><Thermometer size={24} /></div>
+                          <p className="text-2xl font-black text-slate-900 leading-none mb-1">98.6 <span className="text-sm font-bold text-slate-400">°F</span></p>
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Temperature</p>
+                        </div>
+                        <div className="bg-white rounded-24 p-6 border border-slate-100 shadow-soft">
+                          <div className="w-12 h-12 bg-teal-50 text-teal-500 rounded-xl flex items-center justify-center mb-4 transition-transform hover:scale-110"><Droplets size={24} /></div>
+                          <p className="text-2xl font-black text-slate-900 leading-none mb-1">O+ <span className="text-sm font-bold text-slate-400">Group</span></p>
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Blood Type</p>
+                        </div>
+                      </div>
+
+                      {/* History Table */}
+                      <div className="bg-white rounded-[32px] border border-slate-100 shadow-sm overflow-hidden">
+                        <div className="px-8 py-6 border-b border-slate-50 flex items-center justify-between bg-slate-50/30">
+                          <h5 className="text-[13px] font-black text-slate-900 uppercase tracking-widest flex items-center gap-2">
+                             <FileSpreadsheet size={16} className="text-blue-500" /> Recent Clinical History
+                          </h5>
+                          <button className="text-[10px] font-black text-[#007AFF] uppercase tracking-widest hover:underline">View All Records</button>
+                        </div>
+                        <table className="w-full text-[11px] font-bold">
+                          <thead>
+                            <tr className="bg-slate-50/50">
+                              <th className="px-8 py-4 text-left text-slate-400 uppercase tracking-[0.2em] font-black">Date</th>
+                              <th className="px-8 py-4 text-left text-slate-400 uppercase tracking-[0.2em] font-black">Visit Type</th>
+                              <th className="px-8 py-4 text-left text-slate-400 uppercase tracking-[0.2em] font-black">Diagnosis</th>
+                              <th className="px-8 py-4 text-right text-slate-400 uppercase tracking-[0.2em] font-black">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-50">
+                            {[
+                              { date: 'March 20, 2026', type: 'Routine Checkup', diagnosis: 'Mild Hypertension', status: 'Follow-up Required' },
+                              { date: 'Feb 12, 2026', type: 'Specialized Consult', diagnosis: 'Seasonal Allergies', status: 'Resolved' },
+                              { date: 'Jan 05, 2026', type: 'Emergency', diagnosis: 'Flu Symptoms', status: 'Resolved' }
+                            ].map((h, i) => (
+                              <tr key={i} className="hover:bg-slate-50/30 transition-colors">
+                                <td className="px-8 py-4 text-slate-900">{h.date}</td>
+                                <td className="px-8 py-4 text-blue-600 uppercase tracking-widest text-[9px]">{h.type}</td>
+                                <td className="px-8 py-4 text-slate-600 font-medium">{h.diagnosis}</td>
+                                <td className="px-8 py-4 text-right">
+                                  <span className={`px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest ${h.status === 'Resolved' ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
+                                    {h.status}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      {/* Active Medications */}
+                      <div className="bg-[#1A1F37] rounded-[32px] p-8 text-white relative overflow-hidden">
+                        <div className="relative z-10">
+                          <h5 className="text-[13px] font-black uppercase tracking-[0.2em] mb-6 flex items-center gap-2">
+                             <Pill size={18} className="text-[#007AFF]" /> Active Medications
+                          </h5>
+                          <div className="grid grid-cols-2 gap-4">
+                            {[
+                              { name: 'Amlodipine 5mg', dosage: '1 Tablet Daily', frequency: 'Morning, After Food' },
+                              { name: 'Cetirizine 10mg', dosage: '1 Tablet as needed', frequency: 'Bedtime' }
+                            ].map((m, i) => (
+                              <div key={i} className="bg-white/5 backdrop-blur-md rounded-24 p-5 border border-white/10 hover:bg-white/10 transition-all group">
+                                <div className="flex justify-between items-start mb-3">
+                                  <p className="text-sm font-black tracking-tight">{m.name}</p>
+                                  <div className="w-8 h-8 rounded-lg bg-blue-500/20 flex items-center justify-center text-blue-400 group-hover:scale-110 transition-transform"><Plus size={14} /></div>
+                                </div>
+                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.15em] leading-relaxed mb-1">{m.dosage}</p>
+                                <p className="text-[10px] font-black text-blue-400 uppercase tracking-[0.1em]">{m.frequency}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                        
+                        <div className="absolute top-1/2 -right-20 -translate-y-1/2 w-64 h-64 bg-[#007AFF]/10 rounded-full blur-[100px]" />
+                        <div className="absolute -bottom-10 -left-10 w-48 h-48 bg-blue-500/5 rounded-full blur-[80px]" />
+                      </div>
+
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+
             {view === 'profile' && (
               <motion.div key="profile" {...pageTransition} className="h-full overflow-y-auto p-10 custom-scrollbar no-scrollbar">
                  <div className="max-w-7xl mx-auto space-y-8 pb-10">

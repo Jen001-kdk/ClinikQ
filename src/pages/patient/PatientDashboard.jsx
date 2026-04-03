@@ -11,133 +11,12 @@ import {
 } from 'react-icons/fa';
 import PatientProfile from '../../components/profile/PatientProfile';
 import StatusModal from '../../components/dashboard/StatusModal';
+import AppointmentCard from '../../components/dashboard/AppointmentCard';
+import RollingNumber from '../../components/dashboard/RollingNumber';
+import MyAppointments from './MyAppointments';
 
-// Sub-component for Appointment Card with liquid-smooth transitions
-const AppointmentCard = ({ app, onCancel }) => {
-  const [isOpen, setIsOpen] = useState(false);
-  
-  const statusConfig = {
-    'Upcoming': { color: 'bg-blue-50 text-blue-600', dot: 'bg-blue-500' },
-    'pending': { color: 'bg-orange-50 text-orange-600', dot: 'bg-orange-500' },
-    'Waiting': { color: 'bg-blue-50 text-blue-600', dot: 'bg-blue-500' },
-    'Now Serving': { color: 'bg-emerald-50 text-emerald-600', dot: 'bg-emerald-500' },
-    'Completed': { color: 'bg-emerald-50 text-emerald-600', dot: 'bg-emerald-500' },
-    'Cancelled': { color: 'bg-rose-50 text-rose-600', dot: 'bg-rose-500' },
-    'All': { color: 'bg-gray-50 text-gray-600', dot: 'bg-gray-500' }
-  };
+// Sub-components moved to separate files
 
-  const config = statusConfig[app.status] || statusConfig['Upcoming'];
-  const dateObj = new Date(app.createdAt);
-  const month = dateObj.toLocaleString('en-US', { month: 'short' }).toUpperCase();
-  const day = dateObj.getDate();
-
-  return (
-    <motion.div 
-      layout
-      initial={{ opacity: 0, scale: 0.95 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.95, x: 50 }}
-      transition={{ duration: 0.4, ease: "easeInOut" }}
-      className="bg-white rounded-[24px] shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_20px_40px_-10px_rgba(0,0,0,0.08)] transition-all duration-300 border border-transparent hover:border-blue-50 overflow-hidden"
-    >
-      <div className="p-6 flex items-center justify-between">
-         <div className="flex items-center gap-6">
-            <div className={`w-[72px] h-[72px] rounded-[18px] flex flex-col items-center justify-center border border-blue-100/50 transition-colors duration-450 ease-in-out ${isOpen ? 'bg-blue-500 text-white' : 'bg-blue-50'}`}>
-               <span className={`text-[10px] font-black tracking-widest uppercase transition-colors duration-450 ${isOpen ? 'text-blue-100' : 'text-blue-500'}`}>{month}</span>
-               <span className={`text-2xl font-extrabold leading-none mt-0.5 transition-colors duration-450 ${isOpen ? 'text-white' : 'text-blue-600'}`}>{day}</span>
-            </div>
-            
-            <div className="flex flex-col gap-3">
-               <div>
-                  <h4 className="text-lg font-bold text-gray-900 leading-tight">{app.doctor}</h4>
-                  <p className="text-xs font-bold text-gray-500 tracking-wide uppercase mt-0.5">{app.department}</p>
-               </div>
-               <div className="flex items-center gap-3">
-                  <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 rounded-[10px] text-blue-600 text-xs font-bold">
-                     <FaTicketAlt /> {app.tokenId}
-                  </div>
-                  <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 rounded-[10px] text-blue-600 text-xs font-bold">
-                     <FaClock /> {app.estimatedWait}
-                  </div>
-               </div>
-            </div>
-         </div>
-
-         <div className="flex items-center gap-6">
-            <div className={`flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold ${config.color}`}>
-               <div className={`w-2 h-2 rounded-full ${config.dot}`}></div> {app.status}
-            </div>
-            {(app.status === 'Waiting' || app.status === 'Upcoming' || app.status === 'pending') && (
-              <button 
-                onClick={() => setIsOpen(!isOpen)}
-                className={`w-10 h-10 rounded-[14px] bg-gray-50 text-gray-400 flex items-center justify-center hover:bg-blue-50 hover:text-blue-500 transition-all duration-450 ease-in-out ${isOpen ? 'rotate-90 scale-110 shadow-sm' : ''}`}
-              >
-                 <FaChevronRight />
-              </button>
-            )}
-         </div>
-      </div>
-
-      <AnimatePresence>
-        {isOpen && (
-          <motion.div 
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.4, ease: "easeInOut" }}
-            className="px-8 pb-8 border-t border-gray-50 bg-gray-50/20"
-          >
-            <div className="pt-6 flex flex-col gap-6">
-               <div className="h-px bg-gradient-to-r from-transparent via-gray-100 to-transparent"></div>
-               <div className="flex items-center justify-between">
-                  <div className="flex flex-col gap-1.5">
-                     <p className="text-[11px] font-black text-gray-400 uppercase tracking-widest">Appointment Management</p>
-                     <p className="text-[14px] font-bold text-gray-600 leading-tight">Need to reschedule or cancel your visit? Actions are irreversible.</p>
-                  </div>
-                  <div className="flex items-center gap-3">
-                     <button 
-                       onClick={onCancel}
-                       className="px-8 py-3.5 bg-rose-50 text-rose-500 rounded-[16px] font-bold text-sm hover:bg-rose-500 hover:text-white hover:shadow-lg hover:shadow-rose-500/30 transition-all duration-450 ease-in-out flex items-center gap-3 active:scale-95"
-                     >
-                        <FaTimesCircle className="text-lg" /> Cancel Appointment
-                     </button>
-                  </div>
-               </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </motion.div>
-  );
-};
-
-// Sub-component for Rolling Number Animation
-const RollingNumber = ({ value }) => {
-  const [displayValue, setDisplayValue] = useState(0);
-
-  useEffect(() => {
-    let start = displayValue;
-    const end = parseInt(value) || 0;
-    if (start === end) return;
-
-    let duration = 1500;
-    let startTime = null;
-
-    const animate = (timestamp) => {
-      if (!startTime) startTime = timestamp;
-      const progress = Math.min((timestamp - startTime) / duration, 1);
-      const easeOut = 1 - Math.pow(1 - progress, 3); // Cubic ease out
-      const current = Math.floor(easeOut * (end - start) + start);
-      setDisplayValue(current);
-      if (progress < 1) {
-        requestAnimationFrame(animate);
-      }
-    };
-    requestAnimationFrame(animate);
-  }, [value]);
-
-  return <span>{displayValue}</span>;
-};
 
 const PatientDashboard = ({ initialTab = 'dashboard' }) => {
 
@@ -159,7 +38,7 @@ const PatientDashboard = ({ initialTab = 'dashboard' }) => {
   const [bookingLoading, setBookingLoading] = useState(false);
   const [activeToken, setActiveToken] = useState(null);
   const [reports, setReports] = useState([]);
-  const [servingToken, setServingToken] = useState({ tokenId: '--', position: 0 });
+  const [servingToken, setServingToken] = useState(null);
   const [stats, setStats] = useState({
     total: 0,
     completed: 0,
@@ -212,8 +91,15 @@ const PatientDashboard = ({ initialTab = 'dashboard' }) => {
   const [user, setUser] = useState({ name: 'Patient', role: 'patient' });
 
   useEffect(() => {
-    const savedName = localStorage.getItem('userName');
-    if (savedName) setUser(prev => ({ ...prev, name: savedName }));
+    const savedData = localStorage.getItem('clinikq_patient_data');
+    if (savedData && savedData !== "undefined") {
+      try {
+        const parsedUser = JSON.parse(savedData);
+        setUser(prev => ({ ...prev, ...parsedUser }));
+      } catch (err) {
+        console.error("Invalid patient data in storage:", err);
+      }
+    }
     
     // Request notification permission
     if ("Notification" in window && Notification.permission === "default") {
@@ -225,26 +111,31 @@ const PatientDashboard = ({ initialTab = 'dashboard' }) => {
     const socket = io('http://localhost:5001');
     
     socket.on('queueUpdate', (data) => {
-      fetchData();
+      // OPTIMIZED: Targeted fetch for status and position only
+      fetchQueueStatus();
     });
 
     // Integrated Notification Listener
     socket.on('notification', (data) => {
-      // Check if this notification is for the current user
-      if (data.userId === localStorage.getItem('userName')) {
+      const savedData = localStorage.getItem('clinikq_patient_data');
+      const currentUser = savedData ? JSON.parse(savedData) : null;
+      const currentId = currentUser?._id || currentUser?.name;
+
+      if (data.userId === currentId) {
         if ("Notification" in window && Notification.permission === "granted") {
            new Notification("ClinikQ Update", {
               body: data.message,
               icon: "/favicon.ico",
               silent: false,
               requireInteraction: true
-            setStatusModal({
-              isOpen: true,
-              title: 'New Notification',
-              message: data.message,
-              type: 'info'
-            });
-         }
+           });
+        }
+        setStatusModal({
+          isOpen: true,
+          title: 'New Notification',
+          message: data.message,
+          type: 'info'
+        });
       }
     });
 
@@ -257,8 +148,8 @@ const PatientDashboard = ({ initialTab = 'dashboard' }) => {
 
     const pollServingToken = async () => {
       try {
-        const servRes = await axios.get(`/api/queue/serving/${activeToken.department}?doctor=${activeToken.doctor}`);
-        setServingToken(servRes.data);
+        const servRes = await axios.get(`/api/queue/serving/${activeToken.department}?doctor=${activeToken.doctor}&doctorId=${activeToken.doctorId}`);
+        setServingToken(servRes.data.servingToken);
       } catch (err) {
         console.error("Polling error:", err);
       }
@@ -271,7 +162,9 @@ const PatientDashboard = ({ initialTab = 'dashboard' }) => {
 
   const fetchData = async () => {
     try {
-      const userName = localStorage.getItem('userName') || 'Patient';
+      const savedData = localStorage.getItem('clinikq_patient_data');
+      const patientData = savedData ? JSON.parse(savedData) : null;
+      const userName = patientData?.name || 'Patient';
       const token = localStorage.getItem('token');
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
@@ -285,7 +178,12 @@ const PatientDashboard = ({ initialTab = 'dashboard' }) => {
       ]);
       
       const userProfile = profileRes.data;
-      setUser(prev => ({ ...prev, ...userProfile }));
+      // Protect identity from being overwritten by socket-triggered updates
+      setUser(prev => ({ 
+        ...prev, 
+        ...userProfile, 
+        name: prev.name || userProfile.name // Prioritize existing state name
+      }));
       
       const appts = apptsRes.data;
       setAppointments(appts);
@@ -295,7 +193,7 @@ const PatientDashboard = ({ initialTab = 'dashboard' }) => {
       
       const { totalVisits, reportsCount, alertsCount } = statsRes.data;
       
-      const active = appts.find(a => a.status === 'Waiting' || a.status === 'Now Serving' || a.status === 'pending');
+      const active = appts.find(a => a.status === 'Waiting' || a.status === 'in-progress' || a.status === 'pending');
       setActiveToken(active);
       
       setStats({
@@ -310,11 +208,11 @@ const PatientDashboard = ({ initialTab = 'dashboard' }) => {
       
       if (active) {
         const [servRes, posRes] = await Promise.all([
-          axios.get(`/api/queue/serving/${active.department}?doctor=${active.doctor}`),
+          axios.get(`/api/queue/serving/${active.department}?doctor=${active.doctor}&doctorId=${active.doctorId}`),
           axios.get(`/api/queue/position/${active.tokenId}`)
         ]);
         
-        setServingToken(servRes.data);
+        setServingToken(servRes.data.servingToken);
         const aheadCount = posRes.data.aheadCount;
         setActiveToken({ ...active, aheadCount });
 
@@ -338,6 +236,35 @@ const PatientDashboard = ({ initialTab = 'dashboard' }) => {
     } catch (err) {
       console.error("Fetch error:", err);
       setLoading(false);
+    }
+  };
+
+  const fetchQueueStatus = async () => {
+    try {
+      const savedData = localStorage.getItem('clinikq_patient_data');
+      const patientData = savedData ? JSON.parse(savedData) : null;
+      if (!patientData) return;
+
+      const userName = patientData.name;
+      const apptsRes = await axios.get(`/api/appointments?userName=${userName}`);
+      const appts = apptsRes.data;
+      setAppointments(appts);
+
+      const active = appts.find(a => a.status === 'Waiting' || a.status === 'in-progress' || a.status === 'pending');
+      setActiveToken(active);
+
+      if (active) {
+        const [servRes, posRes] = await Promise.all([
+          axios.get(`/api/queue/serving/${active.department}?doctor=${active.doctor}&doctorId=${active.doctorId}`),
+          axios.get(`/api/queue/position/${active.tokenId}`)
+        ]);
+        setServingToken(servRes.data.servingToken);
+        setActiveToken({ ...active, aheadCount: posRes.data.aheadCount });
+      } else {
+        setServingToken(null);
+      }
+    } catch (err) {
+      console.error("Queue Sync Error:", err);
     }
   };
 
@@ -456,7 +383,8 @@ const PatientDashboard = ({ initialTab = 'dashboard' }) => {
       
       targetTime.setHours(hours, minutes, 0, 0);
     } else {
-      targetTime = new Date(new Date(activeToken.createdAt).getTime() + 15 * 60 * 1000);
+      const pos = activeToken.aheadCount || 1;
+      targetTime = new Date(new Date(activeToken.createdAt).getTime() + pos * 15 * 60 * 1000);
     }
     
     return {
@@ -539,7 +467,7 @@ const PatientDashboard = ({ initialTab = 'dashboard' }) => {
         <div className="mt-auto p-6">
           <button
             onClick={() => {
-              localStorage.removeItem('userName');
+              localStorage.clear();
               navigate('/login');
             }}
             className="w-full flex items-center gap-3 justify-center px-4 py-4 rounded-[16px] text-rose-500 font-bold text-sm hover:bg-rose-50 hover:shadow-sm transition-all duration-[450ms]"
@@ -705,19 +633,24 @@ const PatientDashboard = ({ initialTab = 'dashboard' }) => {
                               
                               <div className="w-full flex flex-col gap-2.5">
                                  <div className="w-full flex items-center justify-between px-4 py-3 bg-emerald-50 rounded-[14px] text-emerald-700 font-bold text-sm border border-emerald-100/50">
-                                    <span className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.8)]"></div> Now Serving</span>
-                                    <span>{servingToken.tokenId === '--' ? '--' : `${servingToken.tokenId} (in-progress)`}</span>
+                                    <span className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.8)]"></div> In Progress</span>
+                                    <span>{servingToken?.status === 'in-progress' ? `${servingToken.tokenId} (in-progress)` : '--'}</span>
                                  </div>
                                  <div className="w-full flex items-center justify-between px-4 py-3 bg-blue-50 rounded-[14px] text-blue-700 font-bold text-sm border border-blue-100/50">
                                     <span className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-blue-500"></div> Your Position</span>
                                     <span>#{waitTimeMetrics?.patientPosition || 0}</span>
                                  </div>
-                                 <div className={`w-full flex items-center justify-between px-4 py-3 rounded-[14px] font-bold text-sm border transition-all duration-500 ${waitTimeMetrics?.isClose ? 'animate-pulse-orange bg-amber-50 text-amber-900 border-amber-300' : 'bg-orange-50 text-orange-700 border-orange-100/50'}`}>
+                                 <div className={`w-full flex items-center justify-between px-4 py-3 rounded-[14px] font-bold text-sm border transition-all duration-500 ${activeToken.status === 'in-progress' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : (waitTimeMetrics?.isClose ? 'animate-pulse-orange bg-amber-50 text-amber-900 border-amber-300' : 'bg-orange-50 text-orange-700 border-orange-100/50')}`}>
                                     <div className="flex flex-col">
-                                       <span className="flex items-center gap-2"><FaClock className={`text-orange-500 ${waitTimeMetrics?.isClose ? 'animate-spin-slow' : ''}`} /> exact {countdownStr}</span>
-                                       <span className="text-[10px] text-orange-500/70 ml-6">Exp: {waitTimeMetrics?.expectedTime}</span>
+                                       <span className="flex items-center gap-2">
+                                         <FaClock className={`${activeToken.status === 'in-progress' ? 'text-emerald-500' : 'text-orange-500'} ${waitTimeMetrics?.isClose ? 'animate-spin-slow' : ''}`} /> 
+                                         {activeToken.status === 'in-progress' ? 'CONSULTING' : `exact ${countdownStr}`}
+                                       </span>
+                                       {activeToken.status !== 'in-progress' && (
+                                         <span className="text-[10px] text-orange-500/70 ml-6">Exp: {waitTimeMetrics?.expectedTime}</span>
+                                       )}
                                     </div>
-                                    <span className="text-xs font-black tracking-widest uppercase text-orange-600 bg-white/50 px-2 py-1 rounded-md">LIVE</span>
+                                    <span className={`text-xs font-black tracking-widest uppercase bg-white/50 px-2 py-1 rounded-md ${activeToken.status === 'in-progress' ? 'text-emerald-600' : 'text-orange-600'}`}>LIVE</span>
                                  </div>
                               </div>
                             </>
@@ -763,8 +696,8 @@ const PatientDashboard = ({ initialTab = 'dashboard' }) => {
                           
                           <div className="flex items-center justify-between gap-6">
                              <div className="flex-1 p-4 bg-white rounded-[18px] border border-gray-100 shadow-sm text-center">
-                                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Currently Serving</p>
-                                <p className="text-2xl font-black text-gray-900 tracking-tight">{servingToken.tokenId || '--'}</p>
+                                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">In Progress</p>
+                                <p className="text-2xl font-black text-gray-900 tracking-tight">{servingToken?.status === 'in-progress' ? servingToken.tokenId : "--"}</p>
                              </div>
                              <div className="flex-1 p-4 bg-blue-600 rounded-[18px] shadow-lg shadow-blue-500/20 text-center">
                                 <p className="text-[10px] font-black text-blue-100 uppercase tracking-widest mb-1">Your Token</p>
@@ -1015,155 +948,97 @@ const PatientDashboard = ({ initialTab = 'dashboard' }) => {
                     </div>
                  </div>
               </motion.div>
-           ) : activeTab === 'appointments' ? (
-              <div className="flex flex-col gap-8 opacity-0 animate-[fadeIn_0.3s_ease-in-out_forwards]">
-                 {/* Top Metric Row */}
-                 <div className="grid grid-cols-4 gap-6">
-                    {appointmentStats.map((stat, idx) => (
-                       <div key={idx} className="bg-white rounded-[16px] p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] flex items-center justify-between hover:-translate-y-1 transition-all duration-[300ms] cursor-pointer group">
-                          <div>
-                             <p className="text-3xl font-extrabold text-gray-900 mb-1 leading-none">
-                                <RollingNumber value={stat.value} />
-                             </p>
-                             <h3 className="text-xs font-bold text-gray-400 capitalize">{stat.title}</h3>
-                          </div>
-                          <div className={`w-12 h-12 rounded-[14px] border ${stat.color} flex items-center justify-center text-xl shadow-sm group-hover:scale-110 transition-transform duration-[300ms]`}>
-                             {stat.icon}
-                          </div>
-                       </div>
-                    ))}
-                 </div>
-
-                 {/* Filter Bar */}
-                 <div className="flex items-center gap-4 mt-2">
-                    <span className="text-sm font-bold text-gray-400">Filter by:</span>
-                    <div className="flex items-center gap-2 bg-white p-1.5 rounded-[16px] shadow-sm border border-gray-100">
-                       {['All', 'Upcoming', 'Completed', 'Cancelled'].map(filter => (
-                          <button 
-                             key={filter} 
-                             onClick={() => setAppointmentFilter(filter)}
-                             className={`px-5 py-2.5 rounded-[12px] text-xs font-bold transition-all duration-[300ms] ${
-                                appointmentFilter === filter
-                                 ? 'bg-blue-500 text-white shadow-md'
-                                 : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900'
-                             }`}
-                          >
-                             {filter}
-                          </button>
-                       ))}
-                    </div>
-                 </div>
-                 {/* Appointment List with Framer Motion Animations */}
-                  <div className="flex flex-col gap-4 pb-12 overflow-hidden">
-                    <AnimatePresence mode='popLayout'>
-                     {loading ? (
-                        [1, 2, 3].map(i => <Skeleton key={i} className="h-[120px] w-full" />)
-                     ) : filteredAppointments.length === 0 ? (
-                        <motion.div 
-                          initial={{ opacity: 0, y: 20 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          className="py-12 text-center text-gray-400 font-bold"
-                        >
-                           No appointments found for this filter.
-                        </motion.div>
-                     ) : (
-                        filteredAppointments.map((app) => (
-                          <AppointmentCard 
-                            key={app._id} 
-                            app={app} 
-                            onCancel={() => handleCancelAppointment(app._id)} 
-                          />
-                        ))
-                     )}
-                    </AnimatePresence>
+            ) : activeTab === 'appointments' ? (
+               <MyAppointments 
+                 loading={loading}
+                 filteredAppointments={filteredAppointments}
+                 appointmentStats={appointmentStats}
+                 appointmentFilter={appointmentFilter}
+                 setAppointmentFilter={setAppointmentFilter}
+                 handleCancelAppointment={handleCancelAppointment}
+               />
+            ) : activeTab === 'reports' ? (
+               <div className="flex flex-col gap-8 opacity-0 animate-[fadeIn_0.3s_ease-in-out_forwards]">
+                  {/* Filter Bar */}
+                  <div className="flex items-center gap-4 mt-2">
+                     <span className="text-sm font-bold text-gray-400">Filter by:</span>
+                     <div className="flex items-center gap-2 bg-white p-1.5 rounded-[16px] shadow-sm border border-gray-100">
+                        {['All', 'Pending'].map(filter => (
+                           <button 
+                              key={filter} 
+                              onClick={() => setReportFilter(filter)}
+                              className={`px-6 py-2.5 rounded-[12px] text-xs font-bold transition-all duration-[300ms] ${
+                                 reportFilter === filter
+                                  ? 'bg-blue-500 text-white shadow-md'
+                                  : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900 bg-white'
+                              }`}
+                           >
+                              {filter}
+                           </button>
+                        ))}
+                     </div>
                   </div>
-              </div>
-           ) : activeTab === 'reports' ? (
-              <div className="flex flex-col gap-8 opacity-0 animate-[fadeIn_0.3s_ease-in-out_forwards]">
-                 {/* Filter Bar */}
-                 <div className="flex items-center gap-4 mt-2">
-                    <span className="text-sm font-bold text-gray-400">Filter by:</span>
-                    <div className="flex items-center gap-2 bg-white p-1.5 rounded-[16px] shadow-sm border border-gray-100">
-                       {['All', 'Pending'].map(filter => (
-                          <button 
-                             key={filter} 
-                             onClick={() => setReportFilter(filter)}
-                             className={`px-6 py-2.5 rounded-[12px] text-xs font-bold transition-all duration-[300ms] ${
-                                reportFilter === filter
-                                 ? 'bg-blue-500 text-white shadow-md'
-                                 : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900 bg-white'
-                             }`}
-                          >
-                             {filter}
-                          </button>
-                       ))}
-                    </div>
-                 </div>
 
-                 {/* Reports List */}
+                  {/* Reports List */}
                   <div className="flex flex-col gap-4 pb-12">
-                    {filteredReports.length === 0 ? (
-                      <div className="py-12 text-center text-gray-400 font-bold bg-white rounded-[24px] shadow-sm border border-gray-100">
-                         No reports available yet.
-                      </div>
-                    ) : (
-                      filteredReports.map((rep) => {
-                        const iconBg = rep.status === 'Completed' ? 'bg-emerald-50 text-emerald-500' : 'bg-orange-50 text-orange-500';
-                        const statusColor = rep.status === 'Completed' ? 'bg-emerald-50 text-emerald-600' : 'bg-orange-50 text-orange-600';
-                        return (
-                          <div key={rep._id} className="bg-white rounded-[24px] p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_15px_30px_-5px_rgba(0,0,0,0.05)] hover:-translate-y-1 transition-all duration-[500ms] ease-in-out cursor-pointer group flex items-center justify-between border border-transparent hover:border-gray-100">
-                             
-                             <div className="flex items-center gap-6">
-                                <div className={`w-[72px] h-[72px] rounded-[18px] ${iconBg} flex flex-col items-center justify-center border border-white/50 shadow-sm transition-transform duration-[500ms] group-hover:scale-[1.05]`}>
-                                   <FaFileMedical className="text-2xl mb-1" />
-                                </div>
-                                
-                                <div className="flex flex-col gap-2.5">
-                                   <div>
-                                      <h4 className="text-lg font-bold text-gray-900 leading-tight">{rep.doctor}</h4>
-                                      <p className="text-xs font-bold text-gray-500 tracking-wide mt-0.5">{rep.department} • <span className="text-gray-400">{rep.type}</span></p>
-                                   </div>
-                                   <div className="flex items-center gap-3">
-                                      <div className="flex items-center gap-2 px-3 py-1 bg-gray-50 rounded-[8px] text-gray-600 text-xs font-bold border border-gray-100">
-                                         <FaCalendarAlt className="text-gray-400" /> {rep.date}
-                                      </div>
-                                      {rep.files && (
-                                        <div className="flex items-center gap-2 px-3 py-1 bg-blue-50 rounded-[8px] text-blue-600 text-xs font-bold border border-blue-100/50">
-                                           <FaClipboardList /> {rep.files} files
-                                        </div>
-                                      )}
-                                   </div>
-                                </div>
-                             </div>
-
-                             <div className="flex items-center gap-6">
-                                <div className={`flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold ${statusColor}`}>
-                                   {rep.status === 'Completed' ? <FaCheckCircle className="text-sm" /> : <FaClock className="text-sm" />} {rep.status}
-                                </div>
-                                <div className="w-10 h-10 rounded-[14px] bg-gray-50 text-gray-400 flex items-center justify-center group-hover:bg-blue-50 group-hover:text-blue-500 group-hover:translate-x-1 transition-all duration-[500ms]">
-                                   <FaChevronRight />
-                                </div>
-                             </div>
-                             
-                          </div>
-                          );
-                        })
+                     {filteredReports.length === 0 ? (
+                       <div className="py-12 text-center text-gray-400 font-bold bg-white rounded-[24px] shadow-sm border border-gray-100">
+                          No reports available yet.
+                       </div>
+                     ) : (
+                       filteredReports.map((rep) => {
+                         const iconBg = rep.status === 'Completed' ? 'bg-emerald-50 text-emerald-500' : 'bg-orange-50 text-orange-500';
+                         const statusColor = rep.status === 'Completed' ? 'bg-emerald-50 text-emerald-600' : 'bg-orange-50 text-orange-600';
+                         return (
+                           <div key={rep._id} className="bg-white rounded-[24px] p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_15px_30px_-5px_rgba(0,0,0,0.05)] hover:-translate-y-1 transition-all duration-[500ms] ease-in-out cursor-pointer group flex items-center justify-between border border-transparent hover:border-gray-100">
+                              <div className="flex items-center gap-6">
+                                 <div className={`w-[72px] h-[72px] rounded-[18px] ${iconBg} flex flex-col items-center justify-center border border-white/50 shadow-sm transition-transform duration-[500ms] group-hover:scale-[1.05]`}>
+                                    <FaFileMedical className="text-2xl mb-1" />
+                                 </div>
+                                 <div className="flex flex-col gap-2.5">
+                                    <div>
+                                       <h4 className="text-lg font-bold text-gray-900 leading-tight">{rep.doctor}</h4>
+                                       <p className="text-xs font-bold text-gray-500 tracking-wide mt-0.5">{rep.department} • <span className="text-gray-400">{rep.type}</span></p>
+                                    </div>
+                                    <div className="flex items-center gap-3">
+                                       <div className="flex items-center gap-2 px-3 py-1 bg-gray-50 rounded-[8px] text-gray-600 text-xs font-bold border border-gray-100">
+                                          <FaCalendarAlt className="text-gray-400" /> {rep.date}
+                                       </div>
+                                       {rep.files && (
+                                         <div className="flex items-center gap-2 px-3 py-1 bg-blue-50 rounded-[8px] text-blue-600 text-xs font-bold border border-blue-100/50">
+                                            <FaClipboardList /> {rep.files} files
+                                         </div>
+                                       )}
+                                    </div>
+                                 </div>
+                              </div>
+                              <div className="flex items-center gap-6">
+                                 <div className={`flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold ${statusColor}`}>
+                                    {rep.status === 'Completed' ? <FaCheckCircle className="text-sm" /> : <FaClock className="text-sm" />} {rep.status}
+                                 </div>
+                                 <div className="w-10 h-10 rounded-[14px] bg-gray-50 text-gray-400 flex items-center justify-center group-hover:bg-blue-50 group-hover:text-blue-500 group-hover:translate-x-1 transition-all duration-[500ms]">
+                                    <FaChevronRight />
+                                 </div>
+                              </div>
+                           </div>
+                         );
+                       })
                      )}
                   </div>
-              </div>
-           ) : activeTab === 'profile' ? (
-              <div className="opacity-0 animate-[fadeIn_0.5s_ease-out_forwards]">
-                 <PatientProfile />
-              </div>
-           ) : (
-              <div className="flex-1 flex flex-col items-center justify-center py-32 text-center opacity-0 animate-[fadeIn_0.5s_ease-out_forwards]">
+               </div>
+            ) : activeTab === 'profile' ? (
+               <div className="opacity-0 animate-[fadeIn_0.5s_ease-out_forwards]">
+                  <PatientProfile />
+               </div>
+            ) : (
+               <div className="flex-1 flex flex-col items-center justify-center py-32 text-center opacity-0 animate-[fadeIn_0.5s_ease-out_forwards]">
                   <div className="w-24 h-24 bg-white rounded-[32px] flex items-center justify-center mb-6 shadow-sm border border-gray-100">
                      <FaCog className="text-3xl text-gray-300" />
                   </div>
                   <h3 className="text-2xl font-bold text-gray-900 mb-2 capitalize">{activeTab} Interface</h3>
                   <p className="text-gray-400 font-medium max-w-sm text-sm">This module is part of the high-fidelity ecosystem and has been temporarily placeholder'd. Check back soon for the liquid-motion update.</p>
-              </div>
-           )}
+               </div>
+            )}
         </div>
       </main>
       <StatusModal 

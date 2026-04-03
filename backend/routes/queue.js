@@ -7,6 +7,7 @@ module.exports = (io) => {
   router.get('/queue/position/:tokenId', queueController.getPosition);
   router.post('/queue/next', queueController.callNext(io));
   router.post('/queue/done', queueController.markDone(io));
+  router.post('/queue/no-show', queueController.markNoShow(io));
   router.get('/appointments', queueController.getAppointments);
   router.patch('/appointments/:id', queueController.updateAppointment(io));
   router.post('/tokens', queueController.createToken(io));

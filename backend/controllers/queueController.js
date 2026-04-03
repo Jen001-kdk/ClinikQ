@@ -3,15 +3,36 @@ const User = require('../models/User');
 const Department = require('../models/Department');
 const { getUserByToken } = require('../middleware/auth');
 
+// Helper for consistent date formatting DD/MM/YYYY
+const getFormattedDate = () => {
+  const d = new Date();
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const year = d.getFullYear();
+  return `${day}/${month}/${year}`;
+};
+
 // GET /api/queue/serving/:department
 const getServing = async (req, res) => {
   try {
     const { department } = req.params;
-    const { doctor } = req.query;
-    let query = { department, status: 'Now Serving', date: new Date().toLocaleDateString('en-GB') };
-    if (doctor) query.doctor = doctor;
-    const serving = await Token.findOne(query).sort({ updatedAt: -1 });
-    res.json(serving || { tokenId: '--', position: 0 });
+    const { doctor, doctorId } = req.query;
+    const today = getFormattedDate();
+    
+    let query = { status: 'in-progress', date: today };
+    
+    if (doctorId && doctorId !== 'undefined') {
+      query.doctorId = doctorId;
+    } else {
+      query.department = department;
+      if (doctor) query.doctor = doctor;
+    }
+    
+    // FETCH AND POPULATE
+    const serving = await Token.findOne(query)
+      .populate('patientId', 'full_name');
+    
+    res.json({ servingToken: serving || null });
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch serving status' });
   }
@@ -25,7 +46,7 @@ const getPosition = async (req, res) => {
     if (!currentToken) return res.status(404).json({ error: 'Token not found' });
     const aheadCount = await Token.countDocuments({
       doctor: currentToken.doctor,
-      status: { $in: ['Waiting', 'Now Serving'] },
+      status: { $in: ['Waiting', 'in-progress'] },
       createdAt: { $lt: currentToken.createdAt },
       date: currentToken.date
     });
@@ -41,13 +62,15 @@ const callNext = (io) => async (req, res) => {
     const user = await getUserByToken(req);
     if (!user || user.role !== 'doctor') return res.status(401).json({ error: 'Unauthorized' });
 
-    const today = new Date().toLocaleDateString('en-GB');
+    const today = getFormattedDate();
 
+    // 1. Mark existing in-progress tokens as Completed
     await Token.updateMany(
-      { doctorId: user._id, date: today, status: 'Now Serving' },
+      { doctorId: user._id, date: today, status: 'in-progress' },
       { status: 'Completed', position: 0 }
     );
 
+    // 2. Find and update the next patient in queue
     const nextPatient = await Token.findOne({
       doctorId: user._id,
       date: today,
@@ -55,9 +78,13 @@ const callNext = (io) => async (req, res) => {
     }).sort({ createdAt: 1 });
 
     if (nextPatient) {
-      nextPatient.status = 'Now Serving';
+      nextPatient.status = 'in-progress';
       nextPatient.position = 0;
       await nextPatient.save();
+
+      // Populate for response and notification
+      await nextPatient.populate('patientId', 'full_name');
+      await nextPatient.populate('doctorId', 'name full_name email role specialization');
 
       io.emit('notification', {
         userId: nextPatient.userName,
@@ -66,8 +93,20 @@ const callNext = (io) => async (req, res) => {
       });
     }
 
+    // 3. Broadcast queue update to all listeners
     io.emit('queueUpdate', { doctorId: user._id });
-    res.json({ success: true, nextPatient });
+    
+    res.json({ 
+      success: true, 
+      currentPatient: nextPatient, 
+      doctorInfo: {
+        _id: user._id,
+        name: user.name,
+        full_name: user.full_name,
+        role: user.role,
+        specialization: user.specialization
+      }
+    });
   } catch (err) {
     console.error("Queue Error:", err);
     res.status(500).json({ error: 'Failed to advance queue' });
@@ -80,35 +119,104 @@ const markDone = (io) => async (req, res) => {
     const user = await getUserByToken(req);
     if (!user || user.role !== 'doctor') return res.status(401).json({ error: 'Unauthorized' });
 
-    const today = new Date().toLocaleDateString('en-GB');
+    const today = getFormattedDate();
 
-    await Token.updateMany(
-      { doctorId: user._id, date: today, status: 'Now Serving' },
-      { status: 'Completed', position: 0 }
+    // Mark current in-progress as Completed
+    const updatedToken = await Token.findOneAndUpdate(
+      { doctorId: user._id, date: today, status: 'in-progress' },
+      { status: 'Completed', position: 0 },
+      { new: true }
     );
 
-    io.emit('queueUpdate', { doctor: user.name });
-    res.json({ success: true });
+    if (updatedToken) {
+      await updatedToken.populate('patientId', 'full_name');
+    }
+
+    // Broadcast update using consistent doctorId
+    io.emit('queueUpdate', { doctorId: user._id });
+    
+    res.json({ 
+      success: true, 
+      modifiedCount: updatedToken ? 1 : 0,
+      patientName: updatedToken?.patientId?.full_name || updatedToken?.userName 
+    });
   } catch (err) {
+    console.error("Mark Done Error:", err);
     res.status(500).json({ error: 'Failed to complete appointment' });
+  }
+};
+
+// POST /api/queue/no-show
+const markNoShow = (io) => async (req, res) => {
+  try {
+    const user = await getUserByToken(req);
+    if (!user || user.role !== 'doctor') return res.status(401).json({ error: 'Unauthorized' });
+
+    const today = getFormattedDate();
+
+    // 1. Try to mark current in-progress as no-show
+    let updatedToken = await Token.findOneAndUpdate(
+      { doctorId: user._id, date: today, status: 'in-progress' },
+      { status: 'no-show', position: 0 },
+      { new: true }
+    );
+
+    // 2. Fallback: If no one is in-progress, mark the first pending/Waiting as no-show
+    if (!updatedToken) {
+      updatedToken = await Token.findOneAndUpdate(
+        { doctorId: user._id, date: today, status: { $in: ['Waiting', 'pending'] } },
+        { status: 'no-show', position: 0 },
+        { new: true, sort: { createdAt: 1 } }
+      );
+    }
+
+    if (updatedToken) {
+      await updatedToken.populate('patientId', 'full_name');
+    }
+
+    // Broadcast: This clears the serving status immediately for all screens
+    io.emit('queueUpdate', { doctorId: user._id });
+    
+    res.json({ 
+      success: true, 
+      modifiedCount: updatedToken ? 1 : 0,
+      patientName: updatedToken?.patientId?.full_name || updatedToken?.userName
+    });
+  } catch (err) {
+    console.error("Mark No-Show Error:", err);
+    res.status(500).json({ error: 'Failed to mark as no-show' });
   }
 };
 
 // GET /api/appointments
 const getAppointments = async (req, res) => {
   try {
-    const { userName, date, doctor, doctorId } = req.query;
+    const user = await getUserByToken(req);
+    const { userName, date, doctor, doctorId, status } = req.query;
     let query = {};
-    if (userName) query.userName = userName;
+
+    if (user && user.role === 'doctor') {
+      // Priority 1: Logged-in Doctor's ID
+      query.doctorId = user._id;
+    } else if (userName) {
+      // Priority 2: Patient's Username
+      query.userName = userName;
+    }
+
+    // Manual Overrides / Additional Filters
     if (date) query.date = date;
     if (doctor) query.doctor = doctor;
-    if (doctorId) query.doctorId = doctorId;
+    if (doctorId && !query.doctorId) query.doctorId = doctorId;
+    if (status && status !== 'All') query.status = status;
 
     const tokens = await Token.find(query)
-      .populate('patientId', 'name email role')
+      .populate('patientId', 'name full_name email role')
+      .populate('doctorId', 'name full_name email role specialization')
       .sort({ createdAt: -1 });
+
     res.json(tokens);
   } catch (err) {
+    console.error("Fetch appointments error:", err);
     res.status(500).json({ error: 'Failed to fetch appointments' });
   }
 };
@@ -141,7 +249,7 @@ const createToken = (io) => async (req, res) => {
       }
     }
 
-    const todayStr = new Date().toLocaleDateString('en-GB');
+    const todayStr = getFormattedDate();
     if (date === todayStr) {
       const now = new Date();
       const currentHHMM = now.getHours().toString().padStart(2, '0') + ":" + now.getMinutes().toString().padStart(2, '0');
@@ -156,7 +264,7 @@ const createToken = (io) => async (req, res) => {
     const count = await Token.countDocuments({
       doctorId: docUser._id,
       date,
-      status: { $in: ['Waiting', 'Now Serving', 'pending'] }
+      status: { $in: ['Waiting', 'in-progress', 'pending'] }
     });
 
     const position = count + 1;
@@ -183,7 +291,7 @@ const createToken = (io) => async (req, res) => {
       userName: userName || "Patient",
       tokenId,
       department,
-      doctor: docUser.name,
+      doctor: docUser.full_name || docUser.name,
       status: 'pending',
       position,
       estimatedWait,
@@ -233,4 +341,4 @@ const getDoctors = async (req, res) => {
   }
 };
 
-module.exports = { getServing, getPosition, callNext, markDone, getAppointments, createToken, updateAppointment, getDepartments, getDoctors };
+module.exports = { getServing, getPosition, callNext, markDone, markNoShow, getAppointments, createToken, updateAppointment, getDepartments, getDoctors };

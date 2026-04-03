@@ -105,14 +105,33 @@ const PatientProfile = () => {
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [profile, setProfile] = useState({
-    name: '',
-    email: '',
-    age: '',
-    gender: '',
-    bloodType: '',
-    contact: '',
-    address: ''
+  const [profile, setProfile] = useState(() => {
+    const saved = localStorage.getItem('clinikq_patient_data');
+    if (saved && saved !== "undefined") {
+      try {
+        const parsed = JSON.parse(saved);
+        return {
+          name: parsed.full_name || parsed.name || '',
+          email: parsed.email || '',
+          age: '',
+          gender: '',
+          bloodType: '',
+          contact: '',
+          address: ''
+        };
+      } catch (err) {
+        console.error("Invalid patient data in storage:", err);
+      }
+    }
+    return {
+      name: '',
+      email: '',
+      age: '',
+      gender: '',
+      bloodType: '',
+      contact: '',
+      address: ''
+    };
   });
 
   const fetchProfile = async () => {

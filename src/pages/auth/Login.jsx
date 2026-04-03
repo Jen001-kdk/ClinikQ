@@ -88,9 +88,16 @@ const Login = () => {
       const response = await axios.post('http://localhost:5001/api/login', formData);
       
       if (response.status === 200) {
-        const { full_name, role, token, specialization } = response.data;
+        const { role, token, specialization, user } = response.data;
         
-        localStorage.setItem('userName', full_name);
+        if (user) {
+          if (role === 'patient') {
+            localStorage.setItem('clinikq_patient_data', JSON.stringify(user));
+          } else if (role === 'doctor') {
+            localStorage.setItem('clinikq_doctor_data', JSON.stringify(user));
+          }
+        }
+        
         localStorage.setItem('userRole', role);
         localStorage.setItem('token', token);
         if (specialization) localStorage.setItem('specialization', specialization);

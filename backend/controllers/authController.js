@@ -21,7 +21,9 @@ const register = async (req, res) => {
     }
 
     const newUser = new User({
-      name, email, password: hashedPassword, role,
+      name, 
+      full_name: req.body.full_name || name, // Sync full_name with name during registration
+      email, password: hashedPassword, role,
       age, gender, bloodType, contact, address,
       degree, specialization, license,
       patientId
@@ -70,7 +72,14 @@ const login = async (req, res) => {
       token: "dummy-jwt-token-" + user._id,
       full_name: user.full_name || user.name,
       role: user.role,
-      specialization: user.role === 'doctor' ? user.specialization : undefined
+      specialization: user.role === 'doctor' ? user.specialization : undefined,
+      user: {
+        _id: user._id,
+        name: user.name,
+        full_name: user.full_name || user.name,
+        email: user.email,
+        role: user.role
+      }
     });
   } catch (error) {
     res.status(500).json({ message: "Server error! Please try again." });

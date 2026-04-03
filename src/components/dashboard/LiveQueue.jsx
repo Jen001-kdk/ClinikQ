@@ -17,7 +17,7 @@ const LiveQueue = ({ serving, onCallNext, onMarkDone }) => {
         </div>
         
         <div className="flex-1 flex flex-col items-center justify-center text-center">
-          <p className="text-[9px] font-black uppercase tracking-[0.2em] opacity-70 mb-1">Now Serving</p>
+          <p className="text-[9px] font-black uppercase tracking-[0.2em] opacity-70 mb-1">In Progress</p>
           <motion.div 
             key={serving?.tokenId || 'idle'}
             initial={{ scale: 0.9, opacity: 0 }}
@@ -26,7 +26,9 @@ const LiveQueue = ({ serving, onCallNext, onMarkDone }) => {
           >
             #{serving?.tokenId || '--'}
           </motion.div>
-          <p className="text-sm font-bold mb-4 uppercase tracking-wide">{serving?.userName || 'No patient currently'}</p>
+          <p className="text-sm font-bold mb-4 uppercase tracking-wide">
+            {serving?.patientId?.full_name || serving?.patientId?.name || serving?.userName || (serving ? "Patient" : "No patient currently")}
+          </p>
           <span className="px-3 py-1 bg-white/10 rounded-full text-[9px] font-black uppercase tracking-widest border border-white/5 backdrop-blur-md">
             {serving ? 'Consultation Phase' : 'Standing By'}
           </span>
